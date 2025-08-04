@@ -59,10 +59,13 @@ class Autoracer(Node):
         self.traffic_light_attempts = 0
         self.max_attempts = 100  # 10초 후 강제 시작
         
-        # 타이머 설정 (메인 루프용)
-        self.timer = self.create_timer(0.05, self.main_loop)  # 20Hz
+        # 타이머 설정 (메인 루프용) - 메모리 절약을 위해 주기 늘림
+        self.timer = self.create_timer(0.1, self.main_loop)  # 10Hz로 감소
         
-        self.get_logger().info("=== ROS2 자율주행 시스템 초기화 완료 ===")
+        # 메모리 사용량 로그 추가
+        self.log_counter = 0
+        
+        self.get_logger().info("=== ROS2 자율주행 시스템 초기화 완료 (최적화 모드) ===")
 
     def image_callback(self, msg):
         """이미지 콜백 함수"""
@@ -76,15 +79,15 @@ class Autoracer(Node):
         """라이다 콜백 함수"""
         self.ranges = np.array(msg.ranges)
         
-        # 중앙 10개 포인트 로깅 (디버깅용)
-        total_points = len(msg.ranges)
-        center = total_points // 2
-        half_width = 5
-        start_idx = max(0, center - half_width)
-        end_idx = min(total_points, center + half_width)
-        center_ranges = msg.ranges[start_idx:end_idx]
-        formatted_ranges = [f"{r:.3f}" for r in center_ranges]
-        self.get_logger().info(f"Center ranges: {formatted_ranges}")
+        # 중앙 10개 포인트 로깅 제거 (메모리 절약)
+        # total_points = len(msg.ranges)
+        # center = total_points // 2
+        # half_width = 5
+        # start_idx = max(0, center - half_width)
+        # end_idx = min(total_points, center + half_width)
+        # center_ranges = msg.ranges[start_idx:end_idx]
+        # formatted_ranges = [f"{r:.3f}" for r in center_ranges]
+        # self.get_logger().info(f"Center ranges: {formatted_ranges}")
 
     def drive(self, angle, speed):
         """차량 제어 명령 발행"""
@@ -148,11 +151,11 @@ class Autoracer(Node):
                     red_detected = True
                     break
 
-            # 디버깅용 이미지 표시 (첫 번째 ROI만)
-            if i == 0:
-                cv2.imshow(f"Traffic Light ROI", roi)
-                if green_detected:
-                    cv2.imshow("Green Mask", green_mask)
+            # 디버깅용 이미지 표시 제거 (메모리 절약)
+            # if i == 0:
+            #     cv2.imshow(f"Traffic Light ROI", roi)
+            #     if green_detected:
+            #         cv2.imshow("Green Mask", green_mask)
 
         # 결과 판단
         if green_detected and not red_detected:
@@ -216,8 +219,8 @@ class Autoracer(Node):
         # 현재 차량 위치 판단 및 주행 경로 계산
         error, lane_status = self.calculate_driving_path(lane_info, width, mid_point)
 
-        # 디버깅용 이미지 생성
-        self.create_debug_image(roi, lane_info, error, width, roi_height)
+        # 디버깅용 이미지 생성 제거 (메모리 절약)
+        # self.create_debug_image(roi, lane_info, error, width, roi_height)
 
         return error
 
@@ -357,13 +360,13 @@ class Autoracer(Node):
         # 차량 중심선 표시
         cv2.line(debug_img, (mid_point, 0), (mid_point, roi_height), (0, 0, 255), 2)
 
-        # 정보 표시 (1280x720에 맞춘 폰트 크기)
-        cv2.putText(debug_img, f"Error: {error:.1f}", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(debug_img, f"Violations: {self.solid_line_violation_count}", (20, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+        # 정보 표시 제거 (메모리 절약)
+        # cv2.putText(debug_img, f"Error: {error:.1f}", (20, 40),
+        #             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        # cv2.putText(debug_img, f"Violations: {self.solid_line_violation_count}", (20, 80),
+        #             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
 
-        cv2.imshow("Lane Analysis Debug", debug_img)
+        # cv2.imshow("Lane Analysis Debug", debug_img)
 
     def compute_steering_pid(self, error, lane_status="normal"):
         """실선 위반 방지를 포함한 PID 제어"""
@@ -407,16 +410,18 @@ class Autoracer(Node):
         if self.image is None:
             return
 
-        # 영상 출력
-        cv2.imshow("Original", self.image)
-        cv2.waitKey(1)
+        # 영상 출력 제거 (메모리 절약)
+        # cv2.imshow("Original", self.image)
+        # cv2.waitKey(1)
 
         # 신호등 인식 단계
         if not self.started:
             status = self.detect_traffic_light(self.image)
             self.traffic_light_attempts += 1
 
-            self.get_logger().info(f"[신호등 상태: {status}] 시도: {self.traffic_light_attempts}")
+            # 로깅 빈도 줄임 (5번마다 한 번씩만)
+            if self.traffic_light_attempts % 5 == 0:
+                self.get_logger().info(f"[신호등 상태: {status}] 시도: {self.traffic_light_attempts}")
 
             if status == "green":
                 self.started = True
@@ -450,7 +455,14 @@ class Autoracer(Node):
                 speed = max(0.1, speed - 0.1)
                 self.get_logger().warn(f"실선 위반 누적 {self.solid_line_violation_count}회 - 안전 감속")
 
-            self.get_logger().info(f"[주행] 오차: {error:.1f}, 조향: {steer:.3f}, 속도: {speed:.2f}, 위반: {self.solid_line_violation_count}")
+            # 로깅 빈도 줄임 (10번마다 한 번씩만)
+            if hasattr(self, 'log_counter'):
+                self.log_counter += 1
+            else:
+                self.log_counter = 0
+            
+            if self.log_counter % 10 == 0:
+                self.get_logger().info(f"[주행] 오차: {error:.1f}, 조향: {steer:.3f}, 속도: {speed:.2f}, 위반: {self.solid_line_violation_count}")
 
             self.drive(angle=steer, speed=speed)
 
