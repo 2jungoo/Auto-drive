@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import threading, time, math
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
+from http.server import BaseHTTPRequestHandler, HTTPServer  # (미사용: 스트림 비활성)
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -11,71 +10,12 @@ from sensor_msgs.msg import CompressedImage, LaserScan, Image
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float32, String, Bool
 from cv_bridge import CvBridge
-
 import cv2
 import numpy as np
 from sklearn.cluster import DBSCAN
 
 # =========================
-# MJPEG 스트리머 (디버그 뷰)
-# =========================
-class FrameStore:
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.jpg = None
-
-    def update_bgr(self, bgr, quality=80):
-        ok, buf = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
-        if ok:
-            with self.lock:
-                self.jpg = buf.tobytes()
-
-    def get_jpg(self):
-        with self.lock:
-            return self.jpg
-
-frame_store = FrameStore()
-
-class MjpegHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path.startswith('/stream'):
-            self.send_response(200)
-            self.send_header('Age', '0')
-            self.send_header('Cache-Control', 'no-cache, private')
-            self.send_header('Pragma', 'no-cache')
-            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
-            self.end_headers()
-            try:
-                while True:
-                    jpg = frame_store.get_jpg()
-                    if jpg is not None:
-                        self.wfile.write(b'--frame\r\n')
-                        self.wfile.write(b'Content-Type: image/jpeg\r\n')
-                        self.wfile.write(b'Content-Length: ' + str(len(jpg)).encode() + b'\r\n\r\n')
-                        self.wfile.write(jpg)
-                        self.wfile.write(b'\r\n')
-                    time.sleep(0.01)
-            except Exception:
-                pass
-        else:
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
-            self.end_headers()
-            html = (b"<html><body><h3>MJPEG Stream</h3>"
-                    b"<img src='/stream' />"
-                    b"</body></html>")
-            self.wfile.write(html)
-
-class MjpegServer(threading.Thread):
-    def __init__(self, host='0.0.0.0', port=8080):
-        super().__init__(daemon=True)
-        self.httpd = HTTPServer((host, port), MjpegHandler)
-    def run(self):
-        self.httpd.serve_forever()
-
-
-# =========================
-# 파라미터/상수
+# 전역 파라미터/상수 (누락 보강)
 # =========================
 sensor_qos = QoSProfile(
     depth=1,
@@ -83,7 +23,7 @@ sensor_qos = QoSProfile(
     history=HistoryPolicy.KEEP_LAST
 )
 
-# 라바콘/조향 파라미터 기본값 (필요 시 조정)
+# 조향/라이다 기본값 (필요 시 조정)
 STEERING_SMOOTH_CURVE = 0.2
 STEERING_SMOOTH_STRAIGHT = 0.1
 LIDAR_CONE_MIN_DIST = 0.2
@@ -93,34 +33,30 @@ LIDAR_CONE_MAX_GAP = 0.25
 CONE_PATH_SAFETY_MARGIN = 0.15
 
 
-# =========================
-# ROS2 Autoracer 노드
-# =========================
+# ==================================================
+# ROS2 Autoracer 노드 (브라우저 스트림 제거, OpenCV 창 표시)
+# ==================================================
 class Autoracer(Node):
     def __init__(self):
         super().__init__('Autoracer')
 
-        # --- 카메라 입력 선택 (CSI라면 True 권장) ---
-        self.USE_GSTREAMER_CAMERA = True
-        self.GST_PIPELINE = (
-            "nvarguscamerasrc ! "
-            "video/x-raw(memory:NVMM), width=1280, height=720, framerate=30/1 ! "
-            "nvvidconv ! video/x-raw, format=BGRx ! "
-            "videoconvert ! video/x-raw, format=BGR ! "
-            "appsink drop=true max-buffers=1 sync=false"
-        )
+        # --- OpenCV 윈도우 설정 ---
+        self.SHOW_WINDOW = True
+        self.WINDOW_NAME = "Autoracer Preview"
+        if self.SHOW_WINDOW:
+            cv2.namedWindow(self.WINDOW_NAME, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(self.WINDOW_NAME, 960, 540)
 
         # Sub / Pub
-        if not self.USE_GSTREAMER_CAMERA:
-            self.img_sub = self.create_subscription(
-                CompressedImage, '/image_raw/compressed', self.image_callback, sensor_qos)
+        self.img_sub = self.create_subscription(
+            CompressedImage, '/image_raw/compressed', self.image_callback, sensor_qos)
+        self.lidar_sub = self.create_subscription(
+            LaserScan, '/scan', self.lidar_callback, sensor_qos)
 
-        self.lidar_sub = self.create_subscription(LaserScan, '/scan', self.lidar_callback, sensor_qos)
-
-        self.cmd_pub    = self.create_publisher(Twist,  '/cmd_vel', 10)
-        self.debug_pub  = self.create_publisher(Image,  '/debug/image', 10)
-        self.steer_pub  = self.create_publisher(Float32,'/cmd/steering', 10)
-        self.throt_pub  = self.create_publisher(Float32,'/cmd/throttle', 10)
+        self.cmd_pub    = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.debug_pub  = self.create_publisher(Image, '/debug/image', 10)
+        self.steer_pub  = self.create_publisher(Float32, '/cmd/steering', 10)
+        self.throt_pub  = self.create_publisher(Float32, '/cmd/throttle', 10)
         self.traffic_state_pub = self.create_publisher(String, '/traffic_light_state', 10)
         self.cone_detected_pub = self.create_publisher(Bool, '/cone_mode_active', 10)
 
@@ -130,12 +66,13 @@ class Autoracer(Node):
         self.lidar_ranges = None
         self.front_distance = float('inf')
         self.started = False
+        self.traffic_light_checked_once = False
 
         # 입력(원본) 해상도
         self.img_width  = 1280
         self.img_height = 720
 
-        # ⚙️ 런타임/성능 튜닝 파라미터
+        # ⚙️ 런타임/성능 튜닝 파라미터 (통합)
         self.FIXED_THROTTLE = 0.45
         self.FIXED_SPEED_MPS = 0.4
         self.CURVE_SPEED_MPS = 0.25
@@ -158,7 +95,7 @@ class Autoracer(Node):
         # --- 조향 파라미터 ---
         self.max_steering = 1.0
         self.prev_steering = 0.0
-        self.steer_smooth = STEERING_SMOOTH_STRAIGHT
+        self.steer_smooth = 0.1
         self.max_steer_delta = 0.15
 
         # 차선 폭 추정(px, BEV 기준)
@@ -166,12 +103,6 @@ class Autoracer(Node):
 
         # BEV 변환(처리 해상도 기준)
         self.M, self.Minv = self._compute_perspective(self.proc_w, self.proc_h)
-
-        # MJPEG 디버그
-        self.preview_w, self.preview_h = 640, 360
-        self.server = MjpegServer(port=8080)
-        self.server.start()
-        self.get_logger().info('=== Enhanced Autoracer | MJPEG http://0.0.0.0:8080/stream ===')
 
         # Lock-Follow 상태
         self.frame_idx = 0
@@ -181,10 +112,15 @@ class Autoracer(Node):
         self.prev_right_fit = None
         self.prev_yellow_fit = None
 
-        # 신호등/라바콘 상태
+        # 신호등 & 라바콘 상태 (통합)
+        self.traffic_light_checked = False
+        self.initial_green_detected = False
         self.cone_mode_active = False
+        self.lidar_cone_path = None
+        self.cone_centers_lidar = []  # 디버깅용
+        self.current_curvature = 0.0
 
-        # 색상 마스크 파라미터
+        # 색상 마스크 파라미터 (통합)
         self.WHITE_L_MIN = 180
         self.WHITE_S_MAX = 110
         self.LAB_L_MIN = 200
@@ -200,34 +136,24 @@ class Autoracer(Node):
         self.RED_UPPER2 = np.array([180, 255, 255])
         self.GREEN_LOWER = np.array([40, 60, 60])
         self.GREEN_UPPER = np.array([80, 255, 255])
+        self.ORANGE_LOWER = np.array([8, 150, 150])
+        self.ORANGE_UPPER = np.array([25, 255, 255])
         self.MIN_GREEN_AREA = 800
-
-        # ✅ GStreamer 카메라 오픈 (CSI용)
-        if self.USE_GSTREAMER_CAMERA:
-            self.cap = cv2.VideoCapture(self.GST_PIPELINE, cv2.CAP_GSTREAMER)
-            if not self.cap.isOpened():
-                self.get_logger().error("GStreamer 카메라 오픈 실패")
-            else:
-                threading.Thread(target=self._camera_loop, daemon=True).start()
 
         self.timer = self.create_timer(1.0/30.0, self.control_loop)
 
-    # ---------- GStreamer 카메라 루프 ----------
-    def _camera_loop(self):
-        while True:
-            if not hasattr(self, "cap") or self.cap is None:
-                time.sleep(0.05); continue
-            ok, frame = self.cap.read()
-            if not ok:
-                self.get_logger().warn("카메라 프레임 read 실패")
-                time.sleep(0.02); continue
-            if (frame.shape[1], frame.shape[0]) != (self.img_width, self.img_height):
-                frame = cv2.resize(frame, (self.img_width, self.img_height), interpolation=cv2.INTER_AREA)
-            self.image = frame
+    # ---------- OpenCV 미리보기 ----------
+    def _show(self, img):
+        if not self.SHOW_WINDOW or img is None:
+            return
+        try:
+            cv2.imshow(self.WINDOW_NAME, img)
+            cv2.waitKey(1)  # 논블로킹
+        except Exception as e:
+            self.get_logger().warn(f"preview show fail: {e}")
 
     # ---------- 콜백 ----------
     def image_callback(self, msg: CompressedImage):
-        # (옵션) 외부에서 CompressedImage를 퍼블리시할 때 사용
         try:
             img = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
             if img is None:
@@ -235,6 +161,8 @@ class Autoracer(Node):
             if (img.shape[1], img.shape[0]) != (self.img_width, self.img_height):
                 img = cv2.resize(img, (self.img_width, self.img_height), interpolation=cv2.INTER_AREA)
             self.image = img
+            # 주행 전에도 화면 보이게
+            self._show(self.image)
         except Exception as e:
             self.get_logger().error(f"Image cb: {e}")
 
@@ -250,9 +178,8 @@ class Autoracer(Node):
         except Exception as e:
             self.get_logger().error(f"Lidar cb: {e}")
 
-    # ---------- 신호등(간단 래퍼) ----------
+    # ---------- 신호등(간단 판별) ----------
     def _detect_traffic_light(self, img):
-        """초간단: 상단 중앙에서 녹색 픽셀 양으로 'GREEN/WAIT' 판단"""
         h, w = img.shape[:2]
         roi = img[0:h//3, w//4:3*w//4]
         if roi.size == 0:
@@ -480,7 +407,6 @@ class Autoracer(Node):
     def calc_steering_angle(self, lane_center_bev):
         img_center = self.proc_w / 2.0
         offset = lane_center_bev - img_center
-        kp_dynamic = 0.001 * (1.0 + abs(offset) / (self.proc_w / 4.0))  # (현재는 사용 X)
         curve_bias = 0.0
         if self.prev_left_fit is not None:
             curve_bias = self.prev_left_fit[0] * 200
@@ -510,11 +436,12 @@ class Autoracer(Node):
         return float(np.clip(steering_angle / self.max_steering, -1.0, 1.0))
 
     def publish_debug_image(self, debug_bgr, steering, speed_mps, src_used, cone_centers=[]):
+        # 디버그 퍼블리시는 유지(원하면 주석 처리 가능). 창 표시도 여기서 함께 수행.
         if (self.frame_idx % self.DEBUG_EVERY) != 0:
             return
         preview = debug_bgr.copy()
-        if (debug_bgr.shape[1], debug_bgr.shape[0]) != (self.preview_w, self.preview_h):
-            preview = cv2.resize(debug_bgr, (self.preview_w, self.preview_h), interpolation=cv2.INTER_AREA)
+        if (debug_bgr.shape[1], debug_bgr.shape[0]) != (self.proc_w, self.proc_h):
+            preview = cv2.resize(debug_bgr, (self.proc_w, self.proc_h), interpolation=cv2.INTER_AREA)
 
         vis = self._draw_result(preview, self.prev_left_fit, self.prev_right_fit, self.prev_yellow_fit, self.last_lane_center)
 
@@ -528,14 +455,21 @@ class Autoracer(Node):
         cv2.putText(vis, f"mode={src_used} | steer={math.degrees(steering):.1f}deg",
                     (10,60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        msg = self.bridge.cv2_to_imgmsg(vis, encoding='bgr8')
-        self.debug_pub.publish(msg)
-        frame_store.update_bgr(vis, quality=self.JPEG_QUALITY)
+        # 디버그 토픽 퍼블리시
+        try:
+            msg = self.bridge.cv2_to_imgmsg(vis, encoding='bgr8')
+            self.debug_pub.publish(msg)
+        except Exception:
+            pass
+
+        # 화면 표시
+        self._show(vis)
 
     def _draw_result(self, base_bgr, left_fit, right_fit, yellow_fit, lane_center_bev):
         h, w = base_bgr.shape[:2]
         ploty = np.linspace(0, h-1, h)
         warp_canvas = np.zeros((h, w, 3), dtype=np.uint8)
+
         if left_fit is not None:
             leftx = np.polyval(left_fit, ploty)
             pts = np.int32(np.transpose(np.vstack([leftx, ploty])))
@@ -548,10 +482,12 @@ class Autoracer(Node):
             yx = np.polyval(yellow_fit, ploty)
             pts = np.int32(np.transpose(np.vstack([yx, ploty])))
             cv2.polylines(warp_canvas, [pts], False, (0,255,255), 4)
+
         yb = h - 150
         if lane_center_bev is not None:
             cv2.line(warp_canvas, (int(w/2), yb), (int(w/2), yb-40), (0,255,0), 2)
             cv2.line(warp_canvas, (int(lane_center_bev), yb), (int(lane_center_bev), yb-40), (0,255,255), 2)
+
         unwarp = cv2.warpPerspective(warp_canvas, self.Minv, (w, h))
         out = cv2.addWeighted(base_bgr, 1.0, unwarp, 0.9, 0)
         return out
@@ -572,12 +508,17 @@ class Autoracer(Node):
 
             if not self.started:
                 self.get_logger().info(f"Status: WAITING | Signal: {traffic_light_state}")
-                steering = 0.0; speed_mps = 0.0
+                steering = 0.0
+                speed_mps = 0.0
+                # 대기 중에도 원본을 보여줌
+                self._show(self.image)
+
                 if traffic_light_state == "GREEN":
                     self.get_logger().info("🟢 초록불 감지! 출발합니다.")
                     self.started = True
+                    self.traffic_light_checked_once = True
             else:
-                # --- 주행 ---
+                # 주행 로직
                 cone_detected, path_center_lidar, cones = self.detect_lidar_cones()
                 self.cone_detected_pub.publish(Bool(data=cone_detected))
                 self.cone_mode_active = cone_detected
@@ -587,7 +528,7 @@ class Autoracer(Node):
                     self.steer_smooth = STEERING_SMOOTH_CURVE
                     if path_center_lidar is not None:
                         path_center_pixels = self.convert_lidar_to_image_coords(path_center_lidar)
-                        steering = self.calc_steering_angle(path_center_pixels[0])
+                        steering = self.calc_steering_angle(path_center_pixels[0])  # x만 사용
                         speed_mps = self.CURVE_SPEED_MPS
                     else:
                         steering = self.prev_steering
@@ -596,10 +537,12 @@ class Autoracer(Node):
                 else:
                     self.get_logger().info("Status: LANE FOLLOWING")
                     self.steer_smooth = STEERING_SMOOTH_STRAIGHT
+
                     base = self.image if self.PROC_SCALE == 1.0 else cv2.resize(
                         self.image, (self.proc_w, self.proc_h), interpolation=cv2.INTER_AREA)
 
                     force_redetect = (self.frame_idx % self.REDETECT_MAX_PERIOD) == 0
+
                     if (self.lock_rem > 0) and (self.last_lane_center is not None) and (not force_redetect):
                         lane_center_bev = float(self.last_lane_center)
                         src_used = "LOCK"
@@ -630,6 +573,7 @@ class Autoracer(Node):
                         else:
                             src_used = "FALLBACK"
 
+                        # ✅ 오타 수정: yf -> yfit
                         self.prev_left_fit, self.prev_right_fit, self.prev_yellow_fit = lf, rf, yfit
                         self.last_lane_center = float(lane_center_bev)
 
@@ -640,27 +584,41 @@ class Autoracer(Node):
                     steering   = self.calc_steering_angle(lane_center_bev)
                     speed_mps  = self._adjust_speed_based_on_curvature()
 
-            # 긴급 정지
-            if self.front_distance < self.EMER_STOP_DIST:
-                steering = 0.0; speed_mps = 0.0
+                # 긴급 정지
+                if self.front_distance < self.EMER_STOP_DIST:
+                    steering = 0.0
+                    speed_mps = 0.0
 
-            steer_norm = self.steering_to_normalized(steering)
-            throttle = float(self.FIXED_THROTTLE)
+                steer_norm = self.steering_to_normalized(steering)
+                throttle = float(self.FIXED_THROTTLE)
 
-            cmd = Twist(); cmd.linear.x = speed_mps; cmd.angular.z = steering
-            self.cmd_pub.publish(cmd)
-            self.steer_pub.publish(Float32(data=steer_norm))
-            self.throt_pub.publish(Float32(data=throttle))
+                cmd = Twist(); cmd.linear.x = speed_mps; cmd.angular.z = steering
+                self.cmd_pub.publish(cmd)
+                self.steer_pub.publish(Float32(data=steer_norm))
+                self.throt_pub.publish(Float32(data=throttle))
 
-            if (self.frame_idx % self.DEBUG_EVERY) == 0:
-                vis = self.image.copy() if self.PROC_SCALE == 1.0 else cv2.resize(
-                    self.image, (self.proc_w, self.proc_h), interpolation=cv2.INTER_AREA)
-                vis = self._draw_result(vis, self.prev_left_fit, self.prev_right_fit, self.prev_yellow_fit, self.last_lane_center)
-                self.publish_debug_image(vis, steering, speed_mps, "CONE_AVOID" if self.cone_mode_active else "LANE")
+                # 디버그 프레임 표시/퍼블리시
+                if (self.frame_idx % self.DEBUG_EVERY) == 0:
+                    vis = self.image if self.PROC_SCALE == 1.0 else cv2.resize(
+                        self.image, (self.proc_w, self.proc_h), interpolation=cv2.INTER_AREA)
+                    if self.started:
+                        vis = self._draw_result(vis, self.prev_left_fit, self.prev_right_fit,
+                                                self.prev_yellow_fit, self.last_lane_center)
+
+                    # ✅ 인자 갯수 맞춰 호출
+                    self.publish_debug_image(
+                        vis, steering, speed_mps,
+                        "CONE_AVOID" if self.cone_mode_active else src_used,
+                        cones if self.cone_mode_active else []
+                    )
+
+                    # 즉시 화면에도 보여줌
+                    self._show(vis)
 
         except Exception as e:
             self.get_logger().error(f"Control err: {e}")
-            cmd = Twist(); self.cmd_pub.publish(cmd)
+            cmd = Twist()
+            self.cmd_pub.publish(cmd)
 
     def start(self):
         self.timer = self.create_timer(1.0/30.0, self.control_loop)
@@ -677,6 +635,11 @@ def main(args=None):
     except KeyboardInterrupt:
         node.get_logger().info("KeyboardInterrupt로 종료")
     finally:
+        # OpenCV 창 정리
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
         node.destroy_node()
         rclpy.shutdown()
 
