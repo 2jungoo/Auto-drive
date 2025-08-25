@@ -3,6 +3,7 @@
 
 import threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import warnings
 
 import rclpy
 from rclpy.node import Node
@@ -15,8 +16,18 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 import math
-from scipy import ndimage
-from sklearn.cluster import DBSCAN
+
+# NumPy 경고 억제
+warnings.filterwarnings("ignore", category=UserWarning, module="numpy")
+warnings.filterwarnings("ignore", message=".*smallest_subnormal.*")
+
+# sklearn 대신 간단한 클러스터링 구현
+try:
+    from sklearn.cluster import DBSCAN
+    USE_SKLEARN = True
+except ImportError:
+    USE_SKLEARN = False
+    print("sklearn not available, using simple clustering")
 
 
 # =========================
@@ -241,16 +252,37 @@ class Autoracer(Node):
 
     def lidar_callback(self, msg: LaserScan):
         try:
-            self.lidar_ranges = np.array(msg.ranges)
+            # 안전한 방식으로 ranges 처리
+            ranges_list = list(msg.ranges)
+            self.lidar_ranges = np.array(ranges_list, dtype=np.float64)
             
-            # 전방 거리 계산
-            ranges = np.array(msg.ranges[0:360])
-            c = len(ranges)//2
-            seg = ranges[max(0, c-15):min(len(ranges), c+15)]
-            seg = seg[(seg>0.1) & (seg<10.0)]
-            self.front_distance = float(seg.min()) if seg.size else float('inf')
+            # 무한값과 NaN을 안전한 값으로 대체
+            self.lidar_ranges = np.nan_to_num(self.lidar_ranges, 
+                                            nan=0.0, 
+                                            posinf=10.0, 
+                                            neginf=0.0)
+            
+            # 전방 거리 계산 (중앙 ±15도)
+            total_ranges = len(self.lidar_ranges)
+            if total_ranges > 0:
+                c = total_ranges // 2
+                start_idx = max(0, c - 15)
+                end_idx = min(total_ranges, c + 15)
+                
+                front_seg = self.lidar_ranges[start_idx:end_idx]
+                # 유효한 거리만 선택 (0.1m ~ 10m)
+                valid_seg = front_seg[(front_seg > 0.1) & (front_seg < 10.0)]
+                
+                if len(valid_seg) > 0:
+                    self.front_distance = float(np.min(valid_seg))
+                else:
+                    self.front_distance = float('inf')
+            else:
+                self.front_distance = float('inf')
+                
         except Exception as e:
-            self.get_logger().error(f"Lidar cb: {e}")
+            self.get_logger().error(f"Lidar cb error: {e}")
+            self.front_distance = float('inf')
 
     # ---------- 신호등 검출 (1회만) ----------
     def detect_traffic_light_once(self, img):
@@ -282,6 +314,30 @@ class Autoracer(Node):
         
         return "WAITING_GREEN"
 
+    # ---------- 간단한 클러스터링 (sklearn 대체) ----------
+    def simple_clustering(self, points, eps=0.15, min_samples=3):
+        """sklearn 없이 간단한 클러스터링"""
+        if len(points) < min_samples:
+            return np.array([-1] * len(points))
+        
+        labels = np.array([-1] * len(points))
+        cluster_id = 0
+        
+        for i, point in enumerate(points):
+            if labels[i] != -1:  # 이미 클러스터에 속함
+                continue
+                
+            # 현재 점에서 eps 거리 내의 점들 찾기
+            distances = np.linalg.norm(points - point, axis=1)
+            neighbors = np.where(distances <= eps)[0]
+            
+            if len(neighbors) >= min_samples:
+                # 새 클러스터 생성
+                labels[neighbors] = cluster_id
+                cluster_id += 1
+                
+        return labels
+
     # ---------- 라이다 기반 라바콘 검출 ----------
     def detect_lidar_cones(self):
         """라이다 데이터로 라바콘(장애물) 검출 및 경로 계산"""
@@ -289,52 +345,64 @@ class Autoracer(Node):
             return False, None, []
             
         ranges = self.lidar_ranges
+        # 무한값과 NaN 처리
+        ranges = np.nan_to_num(ranges, nan=0.0, posinf=10.0, neginf=0.0)
+        
         angles = np.linspace(0, 2*np.pi, len(ranges), endpoint=False)
         
         # 유효한 거리 데이터만 필터링
-        valid_mask = (ranges > LIDAR_CONE_MIN_DIST) & (ranges < LIDAR_CONE_MAX_DIST) & np.isfinite(ranges)
+        valid_mask = (ranges > LIDAR_CONE_MIN_DIST) & (ranges < LIDAR_CONE_MAX_DIST)
+        
+        if np.sum(valid_mask) < 5:
+            return False, None, []
+            
         valid_ranges = ranges[valid_mask]
         valid_angles = angles[valid_mask]
-        
-        if len(valid_ranges) < 5:
-            return False, None, []
         
         # 극좌표를 직교좌표로 변환
         x = valid_ranges * np.cos(valid_angles)
         y = valid_ranges * np.sin(valid_angles)
         
-        # 전방 180도 영역만 관심 (라바콘은 전방에 있음)
-        front_mask = (valid_angles > -np.pi/2) & (valid_angles < np.pi/2)
+        # 전방 120도 영역만 관심 (라바콘은 전방에 있음)
+        front_mask = (valid_angles > -np.pi/3) & (valid_angles < np.pi/3)
+        
         if not np.any(front_mask):
             return False, None, []
             
         front_x = x[front_mask]
         front_y = y[front_mask]
         
-        # 라바콘은 보통 0.3m 이상 전방에 있음
-        forward_mask = front_y > 0.3
+        # 라바콘은 보통 0.5m 이상 전방에 있음
+        forward_mask = front_y > 0.5
         if not np.any(forward_mask):
             return False, None, []
             
         cone_x = front_x[forward_mask]
         cone_y = front_y[forward_mask]
         
-        # DBSCAN 클러스터링으로 라바콘 그룹 찾기
+        # 클러스터링으로 라바콘 그룹 찾기
         points = np.column_stack([cone_x, cone_y])
         if len(points) < LIDAR_CONE_MIN_POINTS:
             return False, None, []
-            
-        clustering = DBSCAN(eps=LIDAR_CONE_MAX_GAP, min_samples=LIDAR_CONE_MIN_POINTS).fit(points)
-        labels = clustering.labels_
+        
+        # sklearn 사용 가능하면 DBSCAN, 아니면 간단한 클러스터링
+        if USE_SKLEARN:
+            clustering = DBSCAN(eps=LIDAR_CONE_MAX_GAP, min_samples=LIDAR_CONE_MIN_POINTS).fit(points)
+            labels = clustering.labels_
+        else:
+            labels = self.simple_clustering(points, eps=LIDAR_CONE_MAX_GAP, min_samples=LIDAR_CONE_MIN_POINTS)
         
         # 각 클러스터의 중심점 계산
         cone_centers = []
-        for label in set(labels):
-            if label == -1:  # 노이즈 제외
-                continue
+        unique_labels = set(labels)
+        if -1 in unique_labels:
+            unique_labels.remove(-1)  # 노이즈 제외
+            
+        for label in unique_labels:
             cluster_points = points[labels == label]
-            center = np.mean(cluster_points, axis=0)
-            cone_centers.append(center)
+            if len(cluster_points) >= LIDAR_CONE_MIN_POINTS:
+                center = np.mean(cluster_points, axis=0)
+                cone_centers.append(center)
         
         if len(cone_centers) >= 2:
             # 좌우 라바콘 분리 (x좌표 기준)
