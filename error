@@ -1,3 +1,16 @@
+/opt/ros/foxy/bin/ros2:6: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+  from pkg_resources import load_entry_point
+[INFO] [launch]: All log files can be found below /home/jetson/.ros/log/2025-08-25-06-17-03-965498-nano-10499
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [gstcam_publisher-1]: process started with pid [10505]
+[INFO] [cmd_vel_servo-2]: process started with pid [10507]
+[INFO] [map_scan_tf_node-3]: process started with pid [10509]
+[INFO] [hlds_laser_publisher-4]: process started with pid [10511]
+[hlds_laser_publisher-4] [INFO] [1756095424.477602002] [hlda_laser_publisher]: Init hlds_laser_publisher Node Main
+[hlds_laser_publisher-4] [INFO] [1756095424.480052457] [hlda_laser_publisher]: port : /dev/ttyUSB0 frame_id : laser
+[gstcam_publisher-1] [WARN] [1756095426.088646821] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095426.095607546] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095426.196149432] [gstcam_p
 gstcam_publisher-1] [WARN] [1756095501.695507914] [gstcam_pub_node]: Failed to capture frame
 [gstcam_publisher-1] [WARN] [1756095501.795754094] [gstcam_pub_node]: Failed to capture frame
 [gstcam_publisher-1] [WARN] [1756095501.895746152] [gstcam_pub_node]: Failed to capture frame
