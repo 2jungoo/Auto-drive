@@ -138,64 +138,58 @@ class Autoracer(Node):
         server_thread.start()
     
     def init_camera(self):
-        """카메라 초기화"""
+        """카메라 초기화 - CSI 카메라 우선"""
         
-        # CSI 카메라 파이프라인들
+        # CSI 카메라 파이프라인들 (젯슨 전용)
         pipelines = [
-            ("CSI 고해상도", 'nvarguscamerasrc ! video/x-raw(memory:NVMM), width=3280, height=2464, format=(string)NV12, framerate=(fraction)20/1 ! nvvidconv ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink'),
+            ("CSI 저해상도", 'nvarguscamerasrc ! video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! appsink'),
             ("CSI 중해상도", 'nvarguscamerasrc ! video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! appsink'),
-            ("CSI 저해상도", 'nvarguscamerasrc ! video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! appsink')
+            ("CSI 고해상도", 'nvarguscamerasrc ! video/x-raw(memory:NVMM), width=1920, height=1080, format=NV12, framerate=20/1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! appsink')
         ]
         
-        # CSI 카메라 시도
+        # CSI 카메라 시도 (젯슨에 연결된 카메라)
         for name, pipeline in pipelines:
             try:
-                self.get_logger().info(f'{name} 카메라 시도 중...')
+                self.get_logger().info(f'{name} CSI 카메라 시도 중...')
                 self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
                 if self.cap.isOpened():
-                    ret, frame = self.cap.read()
-                    if ret and frame is not None:
-                        self.get_logger().info(f'✅ {name} 카메라 연결 성공 - 해상도: {frame.shape}')
-                        return
-                    else:
-                        self.cap.release()
-                        self.get_logger().warn(f'{name} 카메라 열렸지만 프레임 읽기 실패')
-                else:
-                    self.get_logger().warn(f'{name} 카메라 열기 실패')
-                    if self.cap:
-                        self.cap.release()
-            except Exception as e:
-                self.get_logger().warn(f'{name} 카메라 연결 실패: {e}')
-                if self.cap:
-                    self.cap.release()
-        
-        # USB 카메라 시도
-        for i in range(4):
-            try:
-                self.get_logger().info(f'USB 카메라 {i}번 포트 시도 중...')
-                self.cap = cv2.VideoCapture(i)
-                if self.cap.isOpened():
-                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                    self.cap.set(cv2.CAP_PROP_FPS, 30)
+                    # CSI 카메라 초기화 시간
+                    self.get_logger().info('CSI 카메라 초기화 중... (3초 대기)')
+                    time.sleep(3)
                     
-                    ret, frame = self.cap.read()
-                    if ret and frame is not None:
-                        self.get_logger().info(f'✅ USB 카메라 {i}번 연결 성공 - 해상도: {frame.shape}')
-                        return
-                    else:
-                        self.cap.release()
-                        self.get_logger().warn(f'USB 카메라 {i}번 열렸지만 프레임 읽기 실패')
+                    # 버퍼 비우기
+                    for _ in range(5):
+                        self.cap.read()
+                    
+                    # 실제 프레임 테스트
+                    for attempt in range(3):
+                        ret, frame = self.cap.read()
+                        if ret and frame is not None and np.any(frame):
+                            self.get_logger().info(f'✅ {name} CSI 카메라 연결 성공!')
+                            self.get_logger().info(f'해상도: {frame.shape}')
+                            self.get_logger().info(f'프레임 체크: min={frame.min()}, max={frame.max()}, 평균={frame.mean():.2f}')
+                            return
+                        else:
+                            self.get_logger().warn(f'{name} CSI 카메라 - 프레임 읽기 시도 {attempt+1}/3')
+                        time.sleep(1)
+                    
+                    self.cap.release()
+                    self.get_logger().warn(f'{name} CSI 카메라 열렸지만 유효한 프레임 없음')
                 else:
-                    self.get_logger().warn(f'USB 카메라 {i}번 열기 실패')
+                    self.get_logger().warn(f'{name} CSI 카메라 열기 실패')
                     if self.cap:
                         self.cap.release()
             except Exception as e:
-                self.get_logger().warn(f'USB 카메라 {i}번 연결 실패: {e}')
+                self.get_logger().warn(f'{name} CSI 카메라 연결 실패: {e}')
                 if self.cap:
                     self.cap.release()
         
-        self.get_logger().error('❌ 모든 카메라 연결 실패')
+        self.get_logger().error('❌ CSI 카메라 연결 실패')
+        self.get_logger().info('CSI 카메라가 제대로 연결되었는지 확인하세요:')
+        self.get_logger().info('  1. 리본 케이블이 젯슨 보드의 CSI 포트에 제대로 꽂혔는지')
+        self.get_logger().info('  2. 카메라 모듈 전원이 켜져 있는지')
+        self.get_logger().info('  3. dmesg | grep -i camera 명령어로 에러 확인')
+        
         self.cap = None
     
     def camera_loop(self):
@@ -206,20 +200,37 @@ class Autoracer(Node):
             try:
                 ret, frame = self.cap.read()
                 if ret and frame is not None:
-                    consecutive_failures = 0
-                    with self.frame_lock:
-                        self.current_frame = frame.copy()
+                    # 프레임 유효성 검사
+                    if np.any(frame):
+                        consecutive_failures = 0
+                        
+                        # 디버깅 정보 출력 (처음 몇 프레임만)
+                        if hasattr(self, 'frame_count'):
+                            self.frame_count += 1
+                        else:
+                            self.frame_count = 1
+                            
+                        if self.frame_count <= 5:
+                            self.get_logger().info(f'프레임 {self.frame_count}: 크기={frame.shape}, min={frame.min()}, max={frame.max()}, 평균={frame.mean():.2f}')
+                        
+                        with self.frame_lock:
+                            self.current_frame = frame.copy()
+                    else:
+                        self.get_logger().warn('빈 프레임 수신됨 (모든 픽셀이 0)')
+                        consecutive_failures += 1
                 else:
                     consecutive_failures += 1
                     if consecutive_failures <= 3:
                         self.get_logger().warn(f'프레임 읽기 실패 ({consecutive_failures}번째)')
-                    
-                    if consecutive_failures >= 10:
-                        self.get_logger().error('카메라 재연결 시도...')
-                        self.reconnect_camera()
-                        consecutive_failures = 0
-                    
-                    time.sleep(0.1)
+                
+                if consecutive_failures >= 10:
+                    self.get_logger().error('카메라 재연결 시도...')
+                    self.reconnect_camera()
+                    consecutive_failures = 0
+                    if self.cap is None:
+                        break
+                
+                time.sleep(0.03)  # ~33fps
                     
             except Exception as e:
                 self.get_logger().error(f'카메라 루프 에러: {e}')
