@@ -7,8 +7,8 @@ from std_msgs.msg import Header
 import subprocess
 import threading
 import time
-import cv2
-import numpy as np
+import signal
+import os
 
 class GstCamPublisher(Node):
     def __init__(self):
@@ -21,85 +21,111 @@ class GstCamPublisher(Node):
             10
         )
         
-        # GStreamer 파이프라인으로 직접 카메라 열기
-        self.init_gstreamer_camera()
+        # GStreamer 프로세스
+        self.gst_process = None
+        self.running = False
         
-        if self.cap is not None and self.cap.isOpened():
-            # 타이머로 주기적 발행 (30 FPS)
-            self.timer = self.create_timer(1.0/30.0, self.publish_image)
-            self.get_logger().info('✅ GStreamer 카메라 시작됨!')
+        # GStreamer로 JPEG 스트림 생성
+        self.init_gstreamer_process()
+        
+        if self.gst_process is not None:
+            # 스레드로 이미지 읽기 시작
+            self.running = True
+            self.capture_thread = threading.Thread(target=self.capture_images, daemon=True)
+            self.capture_thread.start()
+            self.get_logger().info('✅ GStreamer 프로세스 시작됨!')
         else:
-            self.get_logger().error('❌ GStreamer 카메라 초기화 실패')
+            self.get_logger().error('❌ GStreamer 프로세스 시작 실패')
     
-    def init_gstreamer_camera(self):
-        """GStreamer로 CSI 카메라 초기화"""
-        # 작동하는 것으로 확인된 GStreamer 파이프라인
-        pipeline = (
-            'nvarguscamerasrc ! '
-            'video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! '
-            'nvvidconv ! '
-            'video/x-raw, format=BGRx ! '
-            'videoconvert ! '
-            'video/x-raw, format=BGR ! '
-            'appsink'
-        )
-        
+    def init_gstreamer_process(self):
+        """GStreamer 프로세스로 JPEG 스트림 생성"""
         try:
-            self.get_logger().info('🔍 GStreamer CSI 카메라 초기화 중...')
-            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            # GStreamer 파이프라인 - JPEG으로 stdout에 출력
+            gst_pipeline = [
+                'gst-launch-1.0',
+                'nvarguscamerasrc',
+                '!', 'video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1',
+                '!', 'nvvidconv',
+                '!', 'video/x-raw, format=BGRx',
+                '!', 'videoconvert',
+                '!', 'video/x-raw, format=BGR',
+                '!', 'jpegenc', 'quality=90',
+                '!', 'multifilesink', 'location=/tmp/camera_frame.jpg'
+            ]
             
-            if self.cap.isOpened():
-                # 초기화 시간
-                time.sleep(2)
-                
-                # 테스트 프레임 읽기
-                ret, frame = self.cap.read()
-                if ret and frame is not None:
-                    self.get_logger().info(f'✅ GStreamer 카메라 성공! 해상도: {frame.shape}')
-                else:
-                    self.get_logger().error('❌ GStreamer 카메라 프레임 읽기 실패')
-                    self.cap = None
+            self.get_logger().info('🔍 GStreamer 프로세스 시작 중...')
+            
+            # GStreamer 프로세스 실행
+            self.gst_process = subprocess.Popen(
+                gst_pipeline,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                preexec_fn=os.setsid  # 프로세스 그룹 생성
+            )
+            
+            # 2초 대기 후 프로세스 상태 확인
+            time.sleep(2)
+            if self.gst_process.poll() is None:
+                self.get_logger().info('✅ GStreamer 프로세스 정상 실행 중')
             else:
-                self.get_logger().error('❌ GStreamer 카메라 열기 실패')
-                self.cap = None
+                stderr_output = self.gst_process.stderr.read().decode()
+                self.get_logger().error(f'❌ GStreamer 프로세스 종료됨: {stderr_output}')
+                self.gst_process = None
                 
         except Exception as e:
-            self.get_logger().error(f'❌ GStreamer 카메라 에러: {e}')
-            self.cap = None
+            self.get_logger().error(f'❌ GStreamer 프로세스 시작 에러: {e}')
+            self.gst_process = None
     
-    def publish_image(self):
-        """이미지 읽기 및 ROS2 토픽 발행"""
-        if self.cap is None or not self.cap.isOpened():
-            return
+    def capture_images(self):
+        """이미지 캡처 및 발행 스레드"""
+        frame_count = 0
         
-        try:
-            ret, frame = self.cap.read()
-            if ret and frame is not None:
-                # CompressedImage 메시지 생성
-                msg = CompressedImage()
-                msg.header = Header()
-                msg.header.stamp = self.get_clock().now().to_msg()
-                msg.header.frame_id = 'camera_frame'
-                msg.format = 'jpeg'
+        while self.running and rclpy.ok():
+            try:
+                # 파일이 생성될 때까지 대기
+                if os.path.exists('/tmp/camera_frame.jpg'):
+                    # 파일 읽기
+                    with open('/tmp/camera_frame.jpg', 'rb') as f:
+                        jpeg_data = f.read()
+                    
+                    if len(jpeg_data) > 0:
+                        # CompressedImage 메시지 생성
+                        msg = CompressedImage()
+                        msg.header = Header()
+                        msg.header.stamp = self.get_clock().now().to_msg()
+                        msg.header.frame_id = 'camera_frame'
+                        msg.format = 'jpeg'
+                        msg.data = jpeg_data
+                        
+                        # ROS2 토픽으로 발행
+                        self.image_publisher.publish(msg)
+                        
+                        frame_count += 1
+                        if frame_count % 100 == 0:
+                            self.get_logger().info(f'📸 {frame_count}번째 프레임 발행됨')
                 
-                # JPEG로 압축
-                encode_param = [cv2.IMWRITE_JPEG_QUALITY, 90]
-                _, encoded_image = cv2.imencode('.jpg', frame, encode_param)
-                msg.data = encoded_image.tobytes()
+                time.sleep(1.0/30.0)  # 30 FPS
                 
-                # ROS2 토픽으로 발행
-                self.image_publisher.publish(msg)
-                
-            else:
-                self.get_logger().warn('GStreamer 프레임 읽기 실패')
-                
-        except Exception as e:
-            self.get_logger().error(f'이미지 발행 에러: {e}')
+            except Exception as e:
+                self.get_logger().error(f'이미지 캡처 에러: {e}')
+                time.sleep(1)
     
     def destroy_node(self):
         """노드 종료 시 정리"""
-        if hasattr(self, 'cap') and self.cap is not None:
-            self.cap.release()
+        self.running = False
+        
+        if self.gst_process is not None:
+            try:
+                # 프로세스 그룹 전체 종료
+                os.killpg(os.getpgid(self.gst_process.pid), signal.SIGTERM)
+                self.gst_process.wait(timeout=5)
+            except:
+                pass
+        
+        # 임시 파일 삭제
+        if os.path.exists('/tmp/camera_frame.jpg'):
+            os.remove('/tmp/camera_frame.jpg')
+            
         super().destroy_node()
 
 def main(args=None):
