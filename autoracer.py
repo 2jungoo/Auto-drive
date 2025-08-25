@@ -18,7 +18,6 @@ qos_profile = QoSProfile(depth=10)
 qos_profile.reliability = ReliabilityPolicy.BEST_EFFORT
 
 class DriveMode(Enum):
-    WAITING_FOR_GREEN = "WAITING_GREEN"
     RUBBERCON_AVOIDANCE = "RUBBERCON_AVOID"
     LANE_FOLLOWING = "LANE_FOLLOW"
     EMERGENCY_STOP = "EMERGENCY_STOP"
@@ -61,7 +60,6 @@ class WebViewer(BaseHTTPRequestHandler):
                         <h3>🎯 Mission Control</h3>
                         <div class="status-card">
                             <div class="metric"><span>Current Mode:</span><span id="mode" class="metric-value">Loading...</span></div>
-                            <div class="metric"><span>Traffic Light:</span><span id="traffic_light" class="metric-value">Detecting...</span></div>
                             <div class="metric"><span>Rubbercon Status:</span><span id="rubbercon" class="metric-value">Searching...</span></div>
                             <div class="metric"><span>Lane Status:</span><span id="lane" class="metric-value">Detecting...</span></div>
                         </div>
@@ -77,12 +75,11 @@ class WebViewer(BaseHTTPRequestHandler):
                         
                         <h3>🏁 Mission Progress</h3>
                         <div class="progress-bar">
-                            <div id="progress" class="progress-fill" style="width: 33%;"></div>
+                            <div id="progress" class="progress-fill" style="width: 50%;"></div>
                         </div>
                         <div style="font-size: 14px;">
-                            <p id="mission1" style="color: #00ff00;">✅ Mission 1: Green Light Detection</p>
-                            <p id="mission2" style="color: #ffaa00;">🔄 Mission 2: Rubbercon Avoidance</p>
-                            <p id="mission3" style="color: #666;">⏳ Mission 3: Lane Following</p>
+                            <p id="mission1" style="color: #ffaa00;">🔄 Mission 1: Rubbercon Avoidance</p>
+                            <p id="mission2" style="color: #666;">⏳ Mission 2: Lane Following</p>
                         </div>
                         
                         <h3>⚠️ System Alerts</h3>
@@ -99,7 +96,6 @@ class WebViewer(BaseHTTPRequestHandler):
                     .then(r => r.json())
                     .then(data => {
                         document.getElementById('mode').textContent = data.current_mode;
-                        document.getElementById('traffic_light').textContent = data.traffic_light_status;
                         document.getElementById('rubbercon').textContent = data.rubbercon_status;
                         document.getElementById('lane').textContent = data.lane_status;
                         document.getElementById('camera_fps').textContent = data.camera_fps;
@@ -116,17 +112,16 @@ class WebViewer(BaseHTTPRequestHandler):
                         
                         // Progress bar update
                         let progress = 0;
-                        if (data.current_mode.includes('RUBBERCON')) progress = 33;
-                        else if (data.current_mode.includes('LANE')) progress = 66;
-                        else if (data.current_mode.includes('COMPLETE')) progress = 100;
+                        if (data.current_mode.includes('RUBBERCON')) progress = 50;
+                        else if (data.current_mode.includes('LANE')) progress = 100;
                         document.getElementById('progress').style.width = progress + '%';
                         
                         // Mission status colors
-                        const missions = ['mission1', 'mission2', 'mission3'];
+                        const missions = ['mission1', 'mission2'];
                         missions.forEach((m, i) => {
                             const elem = document.getElementById(m);
-                            if (i * 33 < progress) elem.style.color = '#00ff00';
-                            else if (i * 33 === progress - 33) elem.style.color = '#ffaa00';
+                            if (i * 50 < progress) elem.style.color = '#00ff00';
+                            else if (i * 50 === progress - 50) elem.style.color = '#ffaa00';
                         });
                         
                         // Alerts
@@ -191,8 +186,7 @@ class Autoracer(Node):
         self.image_lock = threading.Lock()
         
         # 미션 상태 관리
-        self.current_mode = DriveMode.WAITING_FOR_GREEN
-        self.green_light_detected = False
+        self.current_mode = DriveMode.RUBBERCON_AVOIDANCE
         self.rubbercon_passed = False
         self.lane_following_started = False
         self.lane_detected = False
@@ -345,9 +339,7 @@ class Autoracer(Node):
         self.draw_status_header(processed)
         
         # 미션별 처리
-        if self.current_mode == DriveMode.WAITING_FOR_GREEN:
-            self.detect_traffic_light(processed)
-        elif self.current_mode == DriveMode.RUBBERCON_AVOIDANCE:
+        if self.current_mode == DriveMode.RUBBERCON_AVOIDANCE:
             self.detect_and_avoid_rubbercon(processed)
         elif self.current_mode == DriveMode.LANE_FOLLOWING:
             self.detect_lane_advanced(processed)
@@ -387,77 +379,13 @@ class Autoracer(Node):
         
         progress = 0
         if self.current_mode == DriveMode.RUBBERCON_AVOIDANCE:
-            progress = 33
+            progress = 50
         elif self.current_mode == DriveMode.LANE_FOLLOWING:
-            progress = 66
+            progress = 100
         
         if progress > 0:
             fill_width = int((progress / 100) * progress_width)
             cv2.rectangle(image, (10, 100), (10 + fill_width, 100 + progress_height), (0, 255, 0), -1)
-
-    def detect_traffic_light(self, image):
-        """고급 신호등 검출 - 형태 및 색상 기반"""
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        
-        # 초록색 범위를 더 정밀하게 설정
-        lower_green1 = np.array([35, 40, 40])
-        upper_green1 = np.array([85, 255, 255])
-        
-        lower_green2 = np.array([35, 40, 40])
-        upper_green2 = np.array([85, 255, 255])
-        
-        # 두 개의 마스크를 합침
-        green_mask1 = cv2.inRange(hsv, lower_green1, upper_green1)
-        green_mask2 = cv2.inRange(hsv, lower_green2, upper_green2)
-        green_mask = cv2.bitwise_or(green_mask1, green_mask2)
-        
-        # 노이즈 제거 및 형태학적 연산
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_OPEN, kernel)
-        green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_CLOSE, kernel)
-        
-        # 원형 검출 (Hough Circle)
-        circles = cv2.HoughCircles(
-            green_mask,
-            cv2.HOUGH_GRADIENT,
-            dp=1,
-            minDist=30,
-            param1=50,
-            param2=25,
-            minRadius=8,
-            maxRadius=80
-        )
-        
-        green_detected = False
-        if circles is not None:
-            circles = np.round(circles[0, :]).astype("int")
-            for (x, y, r) in circles:
-                # 신호등 위치 필터링 (화면 상단 중앙 영역)
-                if y < image.shape[0] * 0.6 and r > 10:
-                    # 원형도 검사
-                    mask_roi = green_mask[max(0, y-r):min(green_mask.shape[0], y+r), 
-                                        max(0, x-r):min(green_mask.shape[1], x+r)]
-                    if mask_roi.size > 0:
-                        circle_ratio = cv2.countNonZero(mask_roi) / (math.pi * r * r)
-                        
-                        if circle_ratio > 0.3:  # 원형도 임계값
-                            cv2.circle(image, (x, y), r, (0, 255, 0), 3)
-                            cv2.circle(image, (x, y), 2, (0, 255, 0), -1)
-                            cv2.putText(image, '🟢 GREEN LIGHT!', (x-60, y-r-15), 
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                            green_detected = True
-                            break
-        
-        # 상태 업데이트
-        if green_detected and not self.green_light_detected:
-            self.green_light_detected = True
-            self.current_mode = DriveMode.RUBBERCON_AVOIDANCE
-            self.get_logger().info('🟢 Green light detected! Switching to rubbercon avoidance mode')
-        
-        # 상태 표시
-        status_text = "🟢 GREEN DETECTED - STARTING MISSION!" if green_detected else "🔴 WAITING FOR GREEN LIGHT..."
-        cv2.putText(image, status_text, (10, image.shape[0]-30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if green_detected else (0, 100, 255), 2)
 
     def detect_and_avoid_rubbercon(self, image):
         """라바콘 검출 및 회피 - 2023년 알고리즘 개선"""
@@ -911,12 +839,7 @@ class Autoracer(Node):
         self.current_speed = alpha * self.target_speed + (1 - alpha) * self.current_speed
         self.current_steering = alpha * self.target_steering + (1 - alpha) * self.current_steering
         
-        if self.current_mode == DriveMode.WAITING_FOR_GREEN:
-            # 신호등 대기
-            self.target_speed = 0.0
-            self.target_steering = 0.0
-            
-        elif self.current_mode == DriveMode.RUBBERCON_AVOIDANCE:
+        if self.current_mode == DriveMode.RUBBERCON_AVOIDANCE:
             # 라바콘 회피 - 중간 속도
             self.target_speed = 0.4
             # steering은 detect_and_avoid_rubbercon에서 설정
@@ -939,12 +862,10 @@ class Autoracer(Node):
             # 3초 후 이전 모드로 복귀
             if hasattr(self, 'emergency_start_time'):
                 if time.time() - self.emergency_start_time > 3.0:
-                    if self.green_light_detected and not self.rubbercon_passed:
+                    if not self.rubbercon_passed:
                         self.current_mode = DriveMode.RUBBERCON_AVOIDANCE
-                    elif self.rubbercon_passed:
-                        self.current_mode = DriveMode.LANE_FOLLOWING
                     else:
-                        self.current_mode = DriveMode.WAITING_FOR_GREEN
+                        self.current_mode = DriveMode.LANE_FOLLOWING
                     
                     delattr(self, 'emergency_start_time')
                     self.get_logger().info('🔄 Emergency stop cleared - resuming mission')
@@ -978,7 +899,6 @@ class Autoracer(Node):
         
         return {
             "current_mode": self.current_mode.value,
-            "traffic_light_status": "✅ DETECTED" if self.green_light_detected else "🔍 SEARCHING",
             "rubbercon_status": "✅ PASSED" if self.rubbercon_passed else ("🚧 AVOIDING" if getattr(self, 'rubbercon_avoidance_active', False) else "🔍 SEARCHING"),
             "lane_status": "✅ DETECTED" if getattr(self, 'lane_detected', False) else "🔍 SEARCHING",
             "camera_fps": self.camera_fps,
