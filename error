@@ -1,15 +1,162 @@
-jetson@nano:~$ ros2 launch vibelab_autoracer autoracer_launch.py 
-/opt/ros/foxy/bin/ros2:6: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
-  from pkg_resources import load_entry_point
-[INFO] [launch]: All log files can be found below /home/jetson/.ros/log/2025-08-25-06-57-09-979342-nano-19958
-[INFO] [launch]: Default logging verbosity is set to INFO
-[INFO] [gstcam_publisher-1]: process started with pid [19962]
-[INFO] [cmd_vel_servo-2]: process started with pid [19964]
-[INFO] [map_scan_tf_node-3]: process started with pid [19966]
-[INFO] [hlds_laser_publisher-4]: process started with pid [19968]
-[hlds_laser_publisher-4] [INFO] [1756097830.757809696] [hlda_laser_publisher]: Init hlds_laser_publisher Node Main
-[hlds_laser_publisher-4] [INFO] [1756097830.758221682] [hlda_laser_publisher]: port : /dev/ttyUSB0 frame_id : laser
-[gstcam_publisher-1] [INFO] [1756097831.952016717] [gstcam_pub_node]: 🔍 GStreamer CSI 카메라 초기화 중...
-[gstcam_publisher-1] [ERROR] [1756097831.954989161] [gstcam_pub_node]: ❌ GStreamer 카메라 열기 실패
-[gstcam_publisher-1] [ERROR] [1756097831.956919869] [gstcam_pub_node]: ❌ GStreamer 카메라 초기화 실패
+etson@nano:~$ python autoracer.py 
+[INFO] [1756099628.555853894] [Autoracer]: 🏆 Autoracer 2025 Contest Started!
+[INFO] [1756099628.558223481] [Autoracer]: 🌐 Web server: http://192.168.200.109:8080/
+[INFO] [1756099628.559315277] [Autoracer]: 📊 Dashboard: http://192.168.200.109:8080/
+192.168.200.109 - - [25/Aug/2025 07:27:08] "GET /stats HTTP/1.1" 200 -
+----------------------------------------
+Exception happened during processing of request from ('192.168.200.109', 51864)
+Traceback (most recent call last):
+  File "/usr/lib/python3.8/socketserver.py", line 316, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 347, in process_request
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 360, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "autoracer.py", line 297, in create_handler
+    return WebViewer(self, *args, **kwargs)
+  File "autoracer.py", line 29, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.8/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.8/http/server.py", line 427, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.8/http/server.py", line 415, in handle_one_request
+    method()
+  File "autoracer.py", line 176, in do_GET
+    stats = self.autoracer.get_stats()
+  File "autoracer.py", line 982, in get_stats
+    "lane_status": "✅ DETECTED" if self.lane_detected else "🔍 SEARCHING",
+AttributeError: 'Autoracer' object has no attribute 'lane_detected'
+----------------------------------------
+192.168.200.109 - - [25/Aug/2025 07:27:09] "GET /stats HTTP/1.1" 200 -
+----------------------------------------
+Exception happened during processing of request from ('192.168.200.109', 51866)
+Traceback (most recent call last):
+  File "/usr/lib/python3.8/socketserver.py", line 316, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 347, in process_request
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 360, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "autoracer.py", line 297, in create_handler
+    return WebViewer(self, *args, **kwargs)
+  File "autoracer.py", line 29, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.8/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.8/http/server.py", line 427, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.8/http/server.py", line 415, in handle_one_request
+    method()
+  File "autoracer.py", line 176, in do_GET
+    stats = self.autoracer.get_stats()
+  File "autoracer.py", line 982, in get_stats
+    "lane_status": "✅ DETECTED" if self.lane_detected else "🔍 SEARCHING",
+AttributeError: 'Autoracer' object has no attribute 'lane_detected'
+----------------------------------------
+192.168.200.109 - - [25/Aug/2025 07:27:09] "GET /stats HTTP/1.1" 200 -
+----------------------------------------
+Exception happened during processing of request from ('192.168.200.109', 51868)
+Traceback (most recent call last):
+  File "/usr/lib/python3.8/socketserver.py", line 316, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 347, in process_request
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 360, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "autoracer.py", line 297, in create_handler
+    return WebViewer(self, *args, **kwargs)
+  File "autoracer.py", line 29, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.8/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.8/http/server.py", line 427, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.8/http/server.py", line 415, in handle_one_request
+    method()
+  File "autoracer.py", line 176, in do_GET
+    stats = self.autoracer.get_stats()
+  File "autoracer.py", line 982, in get_stats
+    "lane_status": "✅ DETECTED" if self.lane_detected else "🔍 SEARCHING",
+AttributeError: 'Autoracer' object has no attribute 'lane_detected'
+----------------------------------------
+192.168.200.109 - - [25/Aug/2025 07:27:10] "GET /stats HTTP/1.1" 200 -
+----------------------------------------
+Exception happened during processing of request from ('192.168.200.109', 51870)
+Traceback (most recent call last):
+  File "/usr/lib/python3.8/socketserver.py", line 316, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 347, in process_request
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 360, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "autoracer.py", line 297, in create_handler
+    return WebViewer(self, *args, **kwargs)
+  File "autoracer.py", line 29, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.8/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.8/http/server.py", line 427, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.8/http/server.py", line 415, in handle_one_request
+    method()
+  File "autoracer.py", line 176, in do_GET
+    stats = self.autoracer.get_stats()
+  File "autoracer.py", line 982, in get_stats
+    "lane_status": "✅ DETECTED" if self.lane_detected else "🔍 SEARCHING",
+AttributeError: 'Autoracer' object has no attribute 'lane_detected'
+----------------------------------------
+192.168.200.109 - - [25/Aug/2025 07:27:10] "GET /stats HTTP/1.1" 200 -
+----------------------------------------
+Exception happened during processing of request from ('192.168.200.109', 51872)
+Traceback (most recent call last):
+  File "/usr/lib/python3.8/socketserver.py", line 316, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 347, in process_request
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 360, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "autoracer.py", line 297, in create_handler
+    return WebViewer(self, *args, **kwargs)
+  File "autoracer.py", line 29, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.8/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.8/http/server.py", line 427, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.8/http/server.py", line 415, in handle_one_request
+    method()
+  File "autoracer.py", line 176, in do_GET
+    stats = self.autoracer.get_stats()
+  File "autoracer.py", line 982, in get_stats
+    "lane_status": "✅ DETECTED" if self.lane_detected else "🔍 SEARCHING",
+AttributeError: 'Autoracer' object has no attribute 'lane_detected'
+----------------------------------------
+192.168.200.109 - - [25/Aug/2025 07:27:11] "GET /stats HTTP/1.1" 200 -
+----------------------------------------
+Exception happened during processing of request from ('192.168.200.109', 51874)
+Traceback (most recent call last):
+  File "/usr/lib/python3.8/socketserver.py", line 316, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 347, in process_request
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.8/socketserver.py", line 360, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "autoracer.py", line 297, in create_handler
+    return WebViewer(self, *args, **kwargs)
+  File "autoracer.py", line 29, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.8/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.8/http/server.py", line 427, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.8/http/server.py", line 415, in handle_one_request
+    method()
+  File "autoracer.py", line 176, in do_GET
+    stats = self.autoracer.get_stats()
+  File "autoracer.py", line 982, in get_stats
+    "lane_status": "✅ DETECTED" if self.lane_detected else "🔍 SEARCHING",
+AttributeError: 'Autoracer' object has no attribute 'lane_detected'
+----------------------------------------
+
 
