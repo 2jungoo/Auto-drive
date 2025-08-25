@@ -7,49 +7,14 @@ from sensor_msgs.msg import LaserScan
 import cv2
 import numpy as np
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
 import time
 
 qos_profile = QoSProfile(depth=10)
 qos_profile.reliability = ReliabilityPolicy.BEST_EFFORT
 
-class StreamHandler(BaseHTTPRequestHandler):
-    def __init__(self, frame_getter, *args, **kwargs):
-        self.frame_getter = frame_getter
-        super().__init__(*args, **kwargs)
-    
-    def do_GET(self):
-        if self.path == '/stream':
-            self.send_response(200)
-            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
-            self.end_headers()
-            
-            while True:
-                try:
-                    frame = self.frame_getter()
-                    if frame is not None:
-                        _, buffer = cv2.imencode('.jpg', frame)
-                        self.wfile.write(b'--frame\r\n')
-                        self.send_header('Content-Type', 'image/jpeg')
-                        self.send_header('Content-Length', len(buffer))
-                        self.end_headers()
-                        self.wfile.write(buffer)
-                        self.wfile.write(b'\r\n')
-                    time.sleep(0.033)  # ~30 FPS
-                except Exception as e:
-                    print(f"스트리밍 에러: {e}")
-                    break
-        else:
-            self.send_response(404)
-            self.end_headers()
-
 class Autoracer(Node):
     def __init__(self):
         super().__init__('Autoracer')
-        
-        # 현재 프레임을 저장할 변수
-        self.current_frame = None
-        self.frame_lock = threading.Lock()
         
         # 라이다 구독
         self.lidar_sub = self.create_subscription(
@@ -60,97 +25,165 @@ class Autoracer(Node):
         )
         self.lidar_sub
         
-        # 카메라 초기화
+        # 카메라 초기화 및 스레드 시작
+        self.cap = None
         self.init_camera()
         
-        # HTTP 서버 시작
-        self.start_http_server()
-        
-        # 카메라 프레임 읽기 스레드 시작
-        self.camera_thread = threading.Thread(target=self.camera_loop, daemon=True)
-        self.camera_thread.start()
+        if self.cap is not None:
+            self.camera_thread = threading.Thread(target=self.camera_loop, daemon=True)
+            self.camera_thread.start()
         
         self.get_logger().info('Autoracer 노드가 시작되었습니다.')
-        self.get_logger().info('카메라 스트림: http://젯슨IP주소:8080/stream')
+        if self.cap is not None:
+            self.get_logger().info('카메라 창을 확인하세요. ESC키로 종료 가능합니다.')
     
     def init_camera(self):
-        """카메라 초기화 - CSI, USB 순서대로 시도"""
-        self.cap = None
+        """카메라 초기화 - 여러 방법으로 시도"""
         
-        # CSI 카메라 시도
-        csi_pipeline = (
+        # 방법 1: CSI 카메라 (높은 해상도) - cvcam.py와 동일
+        csi_pipeline_high = (
+            'nvarguscamerasrc ! '
+            'video/x-raw(memory:NVMM), width=3280, height=2464, format=(string)NV12, framerate=(fraction)20/1 ! '
+            'nvvidconv ! video/x-raw, format=(string)BGRx ! '
+            'videoconvert ! video/x-raw, format=(string)BGR ! appsink'
+        )
+        
+        # 방법 2: CSI 카메라 (중간 해상도) - csicam.py와 동일
+        csi_pipeline_mid = (
             'nvarguscamerasrc ! '
             'video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! '
             'nvvidconv ! video/x-raw, format=BGRx ! '
             'videoconvert ! video/x-raw, format=BGR ! appsink'
         )
         
-        try:
-            self.cap = cv2.VideoCapture(csi_pipeline, cv2.CAP_GSTREAMER)
-            if self.cap.isOpened():
-                self.get_logger().info('✅ CSI 카메라 연결 성공')
-                return
-        except Exception as e:
-            self.get_logger().warn(f'CSI 카메라 연결 실패: {e}')
+        # 방법 3: CSI 카메라 (저해상도)
+        csi_pipeline_low = (
+            'nvarguscamerasrc ! '
+            'video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! '
+            'nvvidconv ! video/x-raw, format=BGRx ! '
+            'videoconvert ! video/x-raw, format=BGR ! appsink'
+        )
         
-        # USB 카메라 시도
-        try:
-            self.cap = cv2.VideoCapture(0)
-            if self.cap.isOpened():
-                self.get_logger().info('✅ USB 카메라 연결 성공')
-                return
-        except Exception as e:
-            self.get_logger().warn(f'USB 카메라 연결 실패: {e}')
+        pipelines = [
+            ("CSI 고해상도", csi_pipeline_high),
+            ("CSI 중해상도", csi_pipeline_mid), 
+            ("CSI 저해상도", csi_pipeline_low)
+        ]
+        
+        # CSI 카메라들 순차 시도
+        for name, pipeline in pipelines:
+            try:
+                self.get_logger().info(f'{name} 카메라 시도 중...')
+                self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+                if self.cap.isOpened():
+                    # 실제 프레임 읽기 테스트
+                    ret, frame = self.cap.read()
+                    if ret and frame is not None:
+                        self.get_logger().info(f'✅ {name} 카메라 연결 성공 - 해상도: {frame.shape}')
+                        return
+                    else:
+                        self.cap.release()
+                        self.get_logger().warn(f'{name} 카메라 열렸지만 프레임 읽기 실패')
+                else:
+                    self.get_logger().warn(f'{name} 카메라 열기 실패')
+                    if self.cap:
+                        self.cap.release()
+            except Exception as e:
+                self.get_logger().warn(f'{name} 카메라 연결 실패: {e}')
+                if self.cap:
+                    self.cap.release()
+        
+        # USB 카메라들 시도 (0~3번 포트) - usbcam.py와 동일
+        for i in range(4):
+            try:
+                self.get_logger().info(f'USB 카메라 {i}번 포트 시도 중...')
+                self.cap = cv2.VideoCapture(i)
+                if self.cap.isOpened():
+                    # 해상도 설정
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    self.cap.set(cv2.CAP_PROP_FPS, 30)
+                    
+                    # 실제 프레임 읽기 테스트
+                    ret, frame = self.cap.read()
+                    if ret and frame is not None:
+                        self.get_logger().info(f'✅ USB 카메라 {i}번 연결 성공 - 해상도: {frame.shape}')
+                        return
+                    else:
+                        self.cap.release()
+                        self.get_logger().warn(f'USB 카메라 {i}번 열렸지만 프레임 읽기 실패')
+                else:
+                    self.get_logger().warn(f'USB 카메라 {i}번 열기 실패')
+                    if self.cap:
+                        self.cap.release()
+            except Exception as e:
+                self.get_logger().warn(f'USB 카메라 {i}번 연결 실패: {e}')
+                if self.cap:
+                    self.cap.release()
         
         # 모든 카메라 연결 실패
         self.get_logger().error('❌ 모든 카메라 연결 실패')
         self.cap = None
     
     def camera_loop(self):
-        """카메라 프레임을 지속적으로 읽는 루프"""
-        if self.cap is None:
-            return
-            
+        """카메라 프레임을 지속적으로 읽고 화면에 표시"""
+        consecutive_failures = 0
+        max_failures = 10
+        
         while rclpy.ok():
             try:
                 ret, frame = self.cap.read()
-                if ret:
-                    with self.frame_lock:
-                        self.current_frame = frame.copy()
+                if ret and frame is not None:
+                    consecutive_failures = 0
+                    
+                    # 프레임에 정보 표시
+                    cv2.putText(frame, 'Autoracer Camera', (10, 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.putText(frame, f'Resolution: {frame.shape[1]}x{frame.shape[0]}', (10, 60), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+                    cv2.putText(frame, 'Press ESC to exit', (10, frame.shape[0]-10), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+                    
+                    # 화면에 표시
+                    cv2.imshow('Autoracer Camera', frame)
+                    
+                    # ESC 키로 종료
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == 27:  # ESC key
+                        self.get_logger().info('ESC 키 입력 - 카메라 종료')
+                        break
+                        
                 else:
-                    self.get_logger().warn('프레임 읽기 실패')
+                    consecutive_failures += 1
+                    if consecutive_failures <= 3:
+                        self.get_logger().warn(f'프레임 읽기 실패 ({consecutive_failures}번째)')
+                    
+                    if consecutive_failures >= max_failures:
+                        self.get_logger().error('연속 프레임 읽기 실패. 카메라 재연결 시도...')
+                        self.reconnect_camera()
+                        consecutive_failures = 0
+                        if self.cap is None:
+                            break
+                    
                     time.sleep(0.1)
+                    
             except Exception as e:
-                self.get_logger().error(f'카메라 루프 에러: {e}')
+                consecutive_failures += 1
+                if consecutive_failures <= 3:
+                    self.get_logger().error(f'카메라 루프 에러: {e}')
                 time.sleep(1)
-    
-    def get_current_frame(self):
-        """현재 프레임 반환 (HTTP 서버용)"""
-        with self.frame_lock:
-            if self.current_frame is not None:
-                return self.current_frame.copy()
-            else:
-                # 기본 이미지 생성 (카메라 없을 때)
-                dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(dummy_frame, 'No Camera', (200, 240), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
-                return dummy_frame
-    
-    def start_http_server(self):
-        """HTTP 스트리밍 서버 시작"""
-        def create_handler(*args, **kwargs):
-            return StreamHandler(self.get_current_frame, *args, **kwargs)
         
-        def run_server():
-            try:
-                server = HTTPServer(('0.0.0.0', 8080), create_handler)
-                self.get_logger().info('HTTP 서버 시작: http://0.0.0.0:8080/stream')
-                server.serve_forever()
-            except Exception as e:
-                self.get_logger().error(f'HTTP 서버 에러: {e}')
+        # 정리
+        cv2.destroyAllWindows()
+    
+    def reconnect_camera(self):
+        """카메라 재연결 시도"""
+        if self.cap is not None:
+            self.cap.release()
+            time.sleep(1)
         
-        server_thread = threading.Thread(target=run_server, daemon=True)
-        server_thread.start()
+        self.get_logger().info('카메라 재연결 중...')
+        self.init_camera()
 
     def lidar_callback(self, msg):
         """라이다 데이터 콜백"""
@@ -169,9 +202,10 @@ class Autoracer(Node):
         self.get_logger().info(f"Center 10 ranges: {formatted_ranges}")
     
     def __del__(self):
-        """소멸자 - 카메라 해제"""
+        """소멸자 - 리소스 정리"""
         if hasattr(self, 'cap') and self.cap is not None:
             self.cap.release()
+        cv2.destroyAllWindows()
 
 def main(args=None):
     rclpy.init(args=args)
@@ -180,10 +214,11 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info('Ctrl+C 입력 - 프로그램 종료')
     finally:
         if hasattr(node, 'cap') and node.cap is not None:
             node.cap.release()
+        cv2.destroyAllWindows()
         node.destroy_node()
         rclpy.shutdown()
 
