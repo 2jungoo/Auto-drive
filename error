@@ -1,13 +1,54 @@
-jetson@nano:~$ python autoracer.py 
-[INFO] [1756094878.989307997] [Autoracer]: CSI 고해상도 카메라 시도 중...
-[WARN] [1756094878.992014118] [Autoracer]: CSI 고해상도 카메라 열기 실패
-[INFO] [1756094878.993483403] [Autoracer]: CSI 중해상도 카메라 시도 중...
-[WARN] [1756094878.995354568] [Autoracer]: CSI 중해상도 카메라 열기 실패
-[INFO] [1756094878.996786562] [Autoracer]: CSI 저해상도 카메라 시도 중...
-[WARN] [1756094878.998573923] [Autoracer]: CSI 저해상도 카메라 열기 실패
-[INFO] [1756094879.000056803] [Autoracer]: USB 카메라 0번 포트 시도 중...
-[INFO] [1756094879.779604771] [Autoracer]: ✅ USB 카메라 0번 연결 성공 - 해상도: (2464, 3264, 3)
-[INFO] [1756094879.782537249] [Autoracer]: Autoracer 노드가 시작되었습니다.
-[INFO] [1756094879.784372684] [Autoracer]: 카메라 창을 확인하세요. ESC키로 종료 가능합니다.
-[ERROR] [1756094879.867735759] [Autoracer]: 카메라 루프 에러: OpenCV(4.12.0) /io/opencv/modules/highgui/src/window.cpp:1301: error: (-2:Unspecified error) The function is not implemented. Rebuild the library with Windows, GTK+ 2.x or Cocoa support. If you are on Ubuntu or Debian, install libgtk2.0-dev and pkg-config, then re-run cmake or configure script in function 'cvShowImage'
-
+gstcam_publisher-1] [WARN] [1756095501.695507914] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095501.795754094] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095501.895746152] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095501.996228434] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095502.095628540] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095502.196044458] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095502.295800512] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095502.395914234] [gstcam_pub_node]: Failed to capture frame
+[gstcam_publisher-1] [WARN] [1756095502.495953943] [gstcam_pub_node]: Failed to capture frame
+^C[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[hlds_laser_publisher-4] [INFO] [1756095502.550477660] [rclcpp]: signal_handler(signal_value=2)
+[map_scan_tf_node-3] Traceback (most recent call last):
+[map_scan_tf_node-3]   File "/home/jetson/ros2_ws/install/vibelab_autoracer/lib/vibelab_autoracer/map_scan_tf_node", line 33, in <module>
+[map_scan_tf_node-3]     sys.exit(load_entry_point('vibelab-autoracer', 'console_scripts', 'map_scan_tf_node')())
+[map_scan_tf_node-3]   File "/home/jetson/ros2_ws/build/vibelab_autoracer/vibelab_autoracer/map_scan_tf_node.py", line 54, in main
+[map_scan_tf_node-3]     rclpy.spin(node)
+[map_scan_tf_node-3]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/__init__.py", line 191, in spin
+[map_scan_tf_node-3]     executor.spin_once()
+[map_scan_tf_node-3]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/executors.py", line 711, in spin_once
+[map_scan_tf_node-3]     handler, entity, node = self.wait_for_ready_callbacks(timeout_sec=timeout_sec)
+[map_scan_tf_node-3]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/executors.py", line 697, in wait_for_ready_callbacks
+[map_scan_tf_node-3]     return next(self._cb_iter)
+[map_scan_tf_node-3]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/executors.py", line 593, in _wait_for_ready_callbacks
+[map_scan_tf_node-3]     _rclpy.rclpy_wait(wait_set, timeout_nsec)
+[map_scan_tf_node-3] KeyboardInterrupt
+[cmd_vel_servo-2] Traceback (most recent call last):
+[cmd_vel_servo-2]   File "/home/jetson/ros2_ws/install/vibelab_autoracer/lib/vibelab_autoracer/cmd_vel_servo", line 33, in <module>
+[cmd_vel_servo-2]     sys.exit(load_entry_point('vibelab-autoracer', 'console_scripts', 'cmd_vel_servo')())
+[cmd_vel_servo-2]   File "/home/jetson/ros2_ws/build/vibelab_autoracer/vibelab_autoracer/cmd_vel_servo.py", line 67, in main
+[cmd_vel_servo-2]     rclpy.spin(node)
+[cmd_vel_servo-2]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/__init__.py", line 191, in spin
+[cmd_vel_servo-2]     executor.spin_once()
+[cmd_vel_servo-2]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/executors.py", line 711, in spin_once
+[cmd_vel_servo-2]     handler, entity, node = self.wait_for_ready_callbacks(timeout_sec=timeout_sec)
+[cmd_vel_servo-2]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/executors.py", line 697, in wait_for_ready_callbacks
+[cmd_vel_servo-2]     return next(self._cb_iter)
+[cmd_vel_servo-2]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/executors.py", line 593, in _wait_for_ready_callbacks
+[cmd_vel_servo-2]     _rclpy.rclpy_wait(wait_set, timeout_nsec)
+[cmd_vel_servo-2] KeyboardInterrupt
+[ERROR] [hlds_laser_publisher-4]: process has died [pid 10511, exit code 255, cmd '/opt/ros/foxy/lib/hls_lfcd_lds_driver/hlds_laser_publisher --ros-args -r __node:=hlda_laser_publisher'].
+[cmd_vel_servo-2] Exiting... 
+[cmd_vel_servo-2] Cleaning up pins
+[map_scan_tf_node-3] Exception ignored in: <function Executor.__del__ at 0x7fb5be34c0>
+[map_scan_tf_node-3] Traceback (most recent call last):
+[map_scan_tf_node-3]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/executors.py", line 240, in __del__
+[map_scan_tf_node-3]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/signals.py", line 39, in destroy
+[map_scan_tf_node-3] AttributeError: 'NoneType' object has no attribute 'rclpy_unregister_sigint_guard_condition'
+[map_scan_tf_node-3] Exception ignored in: <function SignalHandlerGuardCondition.__del__ at 0x7fb5bc1e50>
+[map_scan_tf_node-3] Traceback (most recent call last):
+[map_scan_tf_node-3]   File "/opt/ros/foxy/lib/python3.8/site-packages/rclpy/signals.py", line 30, in __del__
+[map_scan_tf_node-3] TypeError: catching classes that do not inherit from BaseException is not allowed
+[ERROR] [map_scan_tf_node-3]: process has died [pid 10509, exit code -2, cmd '/home/jetson/ros2_ws/install/vibelab_autoracer/lib/vibelab_autoracer/map_scan_tf_node --ros-args -r __node:=map_scan_tf_node'].
+[ERROR] [cmd_vel_servo-2]: process has died [pid 10507, exit code -2, cmd '/home/jetson/ros2_ws/install/vibelab_autoracer/lib/vibelab_autoracer/cmd_vel_servo --ros-args -r __node:=cmd_vel_servo_node'].
+[INFO] [gstcam_publisher-1]: process has finished cleanly [pid 10505]
