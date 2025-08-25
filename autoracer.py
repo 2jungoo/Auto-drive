@@ -1,53 +1,191 @@
 #!/usr/bin/env python3
-# -*- coding: utf-7 -*-
-
-import threading, time
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import CompressedImage, LaserScan, Image
-from geometry_msgs.msg import Twist
-from std_msgs.msg import Float32
-from cv_bridge import CvBridge
-
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import LaserScan
 import cv2
 import numpy as np
-import math
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import time
 
+qos_profile = QoSProfile(depth=10)
+qos_profile.reliability = ReliabilityPolicy.BEST_EFFORT
 
-# =========================
-# ⚙️ 런타임/성능 튜닝 파라미터
-# =========================
-FIXED_THROTTLE     = 0.40      # [0.0~1.0] 참고값: 0.40~0.55
-FIXED_SPEED_MPS    = 0.35      # [m/s]
-EMER_STOP_DIST     = 0.45      # [m] 전방 아주 가까우면 즉시 정지
-USE_BOTTOM_CROP    = False      # 본네트 영역 제외(카메라 각도 좋으면 False 권장)
+class StreamHandler(BaseHTTPRequestHandler):
+    def __init__(self, frame_getter, *args, **kwargs):
+        self.frame_getter = frame_getter
+        super().__init__(*args, **kwargs)
+    
+    def do_GET(self):
+        if self.path == '/stream':
+            self.send_response(200)
+            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+            self.end_headers()
+            
+            while True:
+                try:
+                    frame = self.frame_getter()
+                    if frame is not None:
+                        _, buffer = cv2.imencode('.jpg', frame)
+                        self.wfile.write(b'--frame\r\n')
+                        self.send_header('Content-Type', 'image/jpeg')
+                        self.send_header('Content-Length', len(buffer))
+                        self.end_headers()
+                        self.wfile.write(buffer)
+                        self.wfile.write(b'\r\n')
+                    time.sleep(0.033)  # ~30 FPS
+                except Exception as e:
+                    print(f"스트리밍 에러: {e}")
+                    break
+        else:
+            self.send_response(404)
+            self.end_headers()
 
-# 🔒 Lock-Follow & 디버그 스로틀링
-LOCK_TTL_FRAMES      = 12    # 잠금 유지 프레임 수(≈0.4s @30Hz). 커브 많으면 8~10
-REDETECT_MAX_PERIOD = 45    # 이 주기마다 최소 1번은 풀 재검출
-DEBUG_EVERY         = 3     # 디버그/스트림 전송 간격(프레임). 3~5 권장
-JPEG_QUALITY        = 60    # MJPEG 품질(낮출수록 CPU↓)
+class Autoracer(Node):
+    def __init__(self):
+        super().__init__('Autoracer')
+        
+        # 현재 프레임을 저장할 변수
+        self.current_frame = None
+        self.frame_lock = threading.Lock()
+        
+        # 라이다 구독
+        self.lidar_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.lidar_callback,
+            qos_profile
+        )
+        self.lidar_sub
+        
+        # 카메라 초기화
+        self.init_camera()
+        
+        # HTTP 서버 시작
+        self.start_http_server()
+        
+        # 카메라 프레임 읽기 스레드 시작
+        self.camera_thread = threading.Thread(target=self.camera_loop, daemon=True)
+        self.camera_thread.start()
+        
+        self.get_logger().info('Autoracer 노드가 시작되었습니다.')
+        self.get_logger().info('카메라 스트림: http://젯슨IP주소:8080/stream')
+    
+    def init_camera(self):
+        """카메라 초기화 - CSI, USB 순서대로 시도"""
+        self.cap = None
+        
+        # CSI 카메라 시도
+        csi_pipeline = (
+            'nvarguscamerasrc ! '
+            'video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! '
+            'nvvidconv ! video/x-raw, format=BGRx ! '
+            'videoconvert ! video/x-raw, format=BGR ! appsink'
+        )
+        
+        try:
+            self.cap = cv2.VideoCapture(csi_pipeline, cv2.CAP_GSTREAMER)
+            if self.cap.isOpened():
+                self.get_logger().info('✅ CSI 카메라 연결 성공')
+                return
+        except Exception as e:
+            self.get_logger().warn(f'CSI 카메라 연결 실패: {e}')
+        
+        # USB 카메라 시도
+        try:
+            self.cap = cv2.VideoCapture(0)
+            if self.cap.isOpened():
+                self.get_logger().info('✅ USB 카메라 연결 성공')
+                return
+        except Exception as e:
+            self.get_logger().warn(f'USB 카메라 연결 실패: {e}')
+        
+        # 모든 카메라 연결 실패
+        self.get_logger().error('❌ 모든 카메라 연결 실패')
+        self.cap = None
+    
+    def camera_loop(self):
+        """카메라 프레임을 지속적으로 읽는 루프"""
+        if self.cap is None:
+            return
+            
+        while rclpy.ok():
+            try:
+                ret, frame = self.cap.read()
+                if ret:
+                    with self.frame_lock:
+                        self.current_frame = frame.copy()
+                else:
+                    self.get_logger().warn('프레임 읽기 실패')
+                    time.sleep(0.1)
+            except Exception as e:
+                self.get_logger().error(f'카메라 루프 에러: {e}')
+                time.sleep(1)
+    
+    def get_current_frame(self):
+        """현재 프레임 반환 (HTTP 서버용)"""
+        with self.frame_lock:
+            if self.current_frame is not None:
+                return self.current_frame.copy()
+            else:
+                # 기본 이미지 생성 (카메라 없을 때)
+                dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(dummy_frame, 'No Camera', (200, 240), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
+                return dummy_frame
+    
+    def start_http_server(self):
+        """HTTP 스트리밍 서버 시작"""
+        def create_handler(*args, **kwargs):
+            return StreamHandler(self.get_current_frame, *args, **kwargs)
+        
+        def run_server():
+            try:
+                server = HTTPServer(('0.0.0.0', 8080), create_handler)
+                self.get_logger().info('HTTP 서버 시작: http://0.0.0.0:8080/stream')
+                server.serve_forever()
+            except Exception as e:
+                self.get_logger().error(f'HTTP 서버 에러: {e}')
+        
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
 
-# (선택) 내부 처리 해상도 축소: 1.0=원본, 0.75 권장(지연↓)
-PROC_SCALE          = 1.0
+    def lidar_callback(self, msg):
+        """라이다 데이터 콜백"""
+        total_points = len(msg.ranges)
+        
+        # 가운데 10개 인덱스 계산
+        center = total_points // 2
+        half_width = 10 // 2
+        
+        start_idx = max(0, center - half_width)
+        end_idx = min(total_points, center + half_width)
+        
+        center_ranges = msg.ranges[start_idx:end_idx]
+        formatted_ranges = [f"{r:.3f}" for r in center_ranges]
+        
+        self.get_logger().info(f"Center 10 ranges: {formatted_ranges}")
+    
+    def __del__(self):
+        """소멸자 - 카메라 해제"""
+        if hasattr(self, 'cap') and self.cap is not None:
+            self.cap.release()
 
-# =========================
-# 색상 마스크 튜닝(현장 조도에 맞게 소폭 조정)
-# =========================
-# 흰 실선: HLS(밝고 저채도) + LAB(고휘도 중성색) 결합
-WHITE_L_MIN = 180
-WHITE_S_MAX = 110
-LAB_L_MIN   = 200
-LAB_A_DEV   = 12
-LAB_B_DEV   = 12
+def main(args=None):
+    rclpy.init(args=args)
+    node = Autoracer()
+    
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if hasattr(node, 'cap') and node.cap is not None:
+            node.cap.release()
+        node.destroy_node()
+        rclpy.shutdown()
 
-# 노란 점선(HLS)
-YELLOW_H_MIN, YELLOW_H_MAX = 15, 40
-YELLOW_S_MIN = 80
-YELLOW_L_MIN = 80
-
-# 노란선 신뢰 픽셀 임계 (BEV에서)
-YELLOW_PIX_MIN_WARP = 400
+if __name__ == '__main__':
+    main()
