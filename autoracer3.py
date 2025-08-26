@@ -1047,7 +1047,7 @@ class Autoracer(Node):
         
         return left_line, right_line, lane_center
 
-def find_lane_base(self, histogram, prev_base, is_left):
+    def find_lane_base(self, histogram, prev_base, is_left):
         """이전 프레임 정보를 활용한 차선 베이스 찾기"""
         if prev_base > 0 and prev_base < len(histogram):
             search_range = 50
