@@ -95,48 +95,181 @@ class WebViewer(BaseHTTPRequestHandler):
                     font-family: 'Inter', system-ui, -apple-system, sans-serif; 
                     padding: 20px;
                 }
-                .header { text-align: center; padding: 20px 0; background: rgba(255,255,255,0.05); border-radius: 12px; margin-bottom: 20px; }
-                h1 { font-size: 2.5em; background: linear-gradient(90deg, #00ff88, #00ccff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-                .container { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; max-width: 1600px; margin: 0 auto; }
-                .panel { background: rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); }
-                .video-container { position: relative; background: #000; border-radius: 12px; overflow: hidden; }
-                .video-container img { width: 100%; height: auto; display: block; }
-                .mission-indicator { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 20px 0; }
-                .mission-card { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; text-align: center; border: 2px solid rgba(255,255,255,0.1); transition: all 0.3s; }
-                .mission-card.active { background: rgba(0,255,136,0.2); border-color: #00ff88; transform: scale(1.05); }
-                .mission-card.complete { background: rgba(0,200,255,0.2); border-color: #00ccff; }
-                .metric-group { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-                .metric-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
-                .metric-row:last-child { border-bottom: none; }
-                .metric-label { color: #aaa; font-size: 0.9em; }
-                .metric-value { font-weight: 600; color: #00ff88; font-family: 'Courier New', monospace; }
-                .alert-box { background: rgba(255,50,50,0.1); border: 1px solid rgba(255,50,50,0.3); border-radius: 8px; padding: 15px; min-height: 60px; }
-                .status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; animation: pulse 2s infinite; }
+                .header {
+                    text-align: center;
+                    padding: 20px 0;
+                    background: rgba(255,255,255,0.05);
+                    border-radius: 12px;
+                    margin-bottom: 20px;
+                }
+                h1 { 
+                    font-size: 2.5em;
+                    background: linear-gradient(90deg, #00ff88, #00ccff);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                }
+                .container { 
+                    display: grid; 
+                    grid-template-columns: 2fr 1fr;
+                    gap: 20px; 
+                    max-width: 1600px; 
+                    margin: 0 auto; 
+                }
+                .panel { 
+                    background: rgba(255,255,255,0.08); 
+                    border-radius: 16px; 
+                    padding: 24px; 
+                    backdrop-filter: blur(20px);
+                    border: 1px solid rgba(255,255,255,0.1);
+                }
+                .video-container {
+                    position: relative;
+                    background: #000;
+                    border-radius: 12px;
+                    overflow: hidden;
+                }
+                .video-container img {
+                    width: 100%;
+                    height: auto;
+                    display: block;
+                }
+                .mission-indicator {
+                    display: grid;
+                    grid-template-columns: repeat(4, 1fr);
+                    gap: 10px;
+                    margin: 20px 0;
+                }
+                .mission-card {
+                    background: rgba(255,255,255,0.05);
+                    padding: 15px;
+                    border-radius: 8px;
+                    text-align: center;
+                    border: 2px solid rgba(255,255,255,0.1);
+                    transition: all 0.3s;
+                }
+                .mission-card.active {
+                    background: rgba(0,255,136,0.2);
+                    border-color: #00ff88;
+                    transform: scale(1.05);
+                }
+                .mission-card.complete {
+                    background: rgba(0,200,255,0.2);
+                    border-color: #00ccff;
+                }
+                .metric-group {
+                    background: rgba(255,255,255,0.05);
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin-bottom: 15px;
+                }
+                .metric-row {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 8px 0;
+                    border-bottom: 1px solid rgba(255,255,255,0.1);
+                }
+                .metric-row:last-child {
+                    border-bottom: none;
+                }
+                .metric-label {
+                    color: #aaa;
+                    font-size: 0.9em;
+                }
+                .metric-value {
+                    font-weight: 600;
+                    color: #00ff88;
+                    font-family: 'Courier New', monospace;
+                }
+                .alert-box {
+                    background: rgba(255,50,50,0.1);
+                    border: 1px solid rgba(255,50,50,0.3);
+                    border-radius: 8px;
+                    padding: 15px;
+                    min-height: 60px;
+                }
+                .status-indicator {
+                    display: inline-block;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 50%;
+                    margin-right: 8px;
+                    animation: pulse 2s infinite;
+                }
                 .status-green { background: #00ff88; }
                 .status-yellow { background: #ffaa00; }
                 .status-red { background: #ff3366; }
-                @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-                .progress-bar { width: 100%; height: 30px; background: rgba(255,255,255,0.1); border-radius: 15px; overflow: hidden; margin: 20px 0; }
-                .progress-fill { height: 100%; background: linear-gradient(90deg, #00ff88, #00ccff); transition: width 0.5s ease; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.5; }
+                }
+                .progress-bar {
+                    width: 100%;
+                    height: 30px;
+                    background: rgba(255,255,255,0.1);
+                    border-radius: 15px;
+                    overflow: hidden;
+                    margin: 20px 0;
+                }
+                .progress-fill {
+                    height: 100%;
+                    background: linear-gradient(90deg, #00ff88, #00ccff);
+                    transition: width 0.5s ease;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                }
             </style>
         </head>
         <body>
-            <div class="header"><h1>AUTORACER 2025 MISSION CONTROL</h1><p style="color: #888; margin-top: 10px;">Real-time Autonomous Vehicle Monitoring System</p></div>
+            <div class="header">
+                <h1>AUTORACER 2025 MISSION CONTROL</h1>
+                <p style="color: #888; margin-top: 10px;">Real-time Autonomous Vehicle Monitoring System</p>
+            </div>
+            
             <div class="mission-indicator">
                 <div class="mission-card" id="mission1"> <div style="font-size: 1.5em;">🚦</div> <div>Mission 1</div> <small>Traffic Light</small> </div>
                 <div class="mission-card" id="mission2"> <div style="font-size: 1.5em;">🔶</div> <div>Mission 2</div> <small>Rubbercons</small> </div>
                 <div class="mission-card" id="mission3"> <div style="font-size: 1.5em;">🛣️</div> <div>Mission 3</div> <small>Lane Following</small> </div>
                 <div class="mission-card" id="mission4"> <div style="font-size: 1.5em;">🚗</div> <div>Mission 4</div> <small>Obstacle Avoid</small> </div>
             </div>
+            
             <div class="container">
-                <div class="panel"><h3 style="margin-bottom: 15px;">📹 Live Camera Feed</h3><div class="video-container"><img src="/stream.mjpg" alt="Camera Stream"></div><div class="progress-bar"><div id="progress" class="progress-fill" style="width: 0%;"><span id="progress-text">0%</span></div></div></div>
-                <div class="panel"><h3 style="margin-bottom: 15px;">📊 System Metrics</h3>
-                    <div class="metric-group"><h4 style="margin-bottom: 10px; color: #00ccff;">Vehicle Status</h4><div class="metric-row"><span class="metric-label">Mode</span><span id="mode" class="metric-value">INIT</span></div><div class="metric-row"><span class="metric-label">Speed</span><span id="speed" class="metric-value">0.00 m/s</span></div><div class="metric-row"><span class="metric-label">Steering</span><span id="steering" class="metric-value">0.0°</span></div><div class="metric-row"><span class="metric-label">Runtime</span><span id="runtime" class="metric-value">00:00</span></div></div>
-                    <div class="metric-group"><h4 style="margin-bottom: 10px; color: #00ccff;">Detection Status</h4><div class="metric-row"><span class="metric-label">Traffic Light</span><span id="traffic" class="metric-value">SCANNING</span></div><div class="metric-row"><span class="metric-label">Rubbercons</span><span id="rubbercon" class="metric-value">NONE</span></div><div class="metric-row"><span class="metric-label">Lane</span><span id="lane" class="metric-value">NONE</span></div><div class="metric-row"><span class="metric-label">Obstacle</span><span id="obstacle" class="metric-value">CLEAR</span></div></div>
-                    <div class="metric-group"><h4 style="margin-bottom: 10px; color: #00ccff;">Sensors</h4><div class="metric-row"><span class="metric-label">Camera FPS</span><span id="fps" class="metric-value">0</span></div><div class="metric-row"><span class="metric-label">LiDAR Range</span><span id="lidar" class="metric-value">N/A</span></div><div class="metric-row"><span class="metric-label">Confidence</span><span id="confidence" class="metric-value">0%</span></div></div>
-                    <div class="alert-box"><h4 style="margin-bottom: 10px;">⚠️ System Alerts</h4><div id="alerts"><span class="status-indicator status-green"></span><span>All systems operational</span></div></div>
+                <div class="panel">
+                    <h3 style="margin-bottom: 15px;">📹 Live Camera Feed</h3>
+                    <div class="video-container"><img src="/stream.mjpg" alt="Camera Stream"></div>
+                    <div class="progress-bar"><div id="progress" class="progress-fill" style="width: 0%;"><span id="progress-text">0%</span></div></div>
+                </div>
+                
+                <div class="panel">
+                    <h3 style="margin-bottom: 15px;">📊 System Metrics</h3>
+                    <div class="metric-group">
+                        <h4 style="margin-bottom: 10px; color: #00ccff;">Vehicle Status</h4>
+                        <div class="metric-row"><span class="metric-label">Mode</span><span id="mode" class="metric-value">INIT</span></div>
+                        <div class="metric-row"><span class="metric-label">Speed</span><span id="speed" class="metric-value">0.00 m/s</span></div>
+                        <div class="metric-row"><span class="metric-label">Steering</span><span id="steering" class="metric-value">0.0°</span></div>
+                        <div class="metric-row"><span class="metric-label">Runtime</span><span id="runtime" class="metric-value">00:00</span></div>
+                    </div>
+                    <div class="metric-group">
+                        <h4 style="margin-bottom: 10px; color: #00ccff;">Detection Status</h4>
+                        <div class="metric-row"><span class="metric-label">Traffic Light</span><span id="traffic" class="metric-value">SCANNING</span></div>
+                        <div class="metric-row"><span class="metric-label">Rubbercons</span><span id="rubbercon" class="metric-value">NONE</span></div>
+                        <div class="metric-row"><span class="metric-label">Lane</span><span id="lane" class="metric-value">NONE</span></div>
+                        <div class="metric-row"><span class="metric-label">Obstacle</span><span id="obstacle" class="metric-value">CLEAR</span></div>
+                    </div>
+                    <div class="metric-group">
+                        <h4 style="margin-bottom: 10px; color: #00ccff;">Sensors</h4>
+                        <div class="metric-row"><span class="metric-label">Camera FPS</span><span id="fps" class="metric-value">0</span></div>
+                        <div class="metric-row"><span class="metric-label">LiDAR Range</span><span id="lidar" class="metric-value">N/A</span></div>
+                        <div class="metric-row"><span class="metric-label">Confidence</span><span id="confidence" class="metric-value">0%</span></div>
+                    </div>
+                    <div class="alert-box">
+                        <h4 style="margin-bottom: 10px;">⚠️ System Alerts</h4>
+                        <div id="alerts"><span class="status-indicator status-green"></span><span>All systems operational</span></div>
+                    </div>
                 </div>
             </div>
+            
             <script>
                 let startTime = Date.now();
                 function updateDashboard() {
@@ -178,7 +311,7 @@ class WebViewer(BaseHTTPRequestHandler):
         </body>
         </html>
         """
-
+    
     def _handle_stream(self):
         self.send_response(200)
         self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
@@ -220,7 +353,7 @@ class Autoracer(Node):
         self.processed_frame = None
         self.image_lock = threading.Lock()
         self.current_mode = DriveMode.TRAFFIC_LIGHT_WAIT
-        self.mission_stage = 0
+        self.mission_stage = 1
         self.traffic_light_passed = False
         self.rubbercon_passed = False
         self.obstacle_avoided = False
@@ -261,12 +394,10 @@ class Autoracer(Node):
     def _start_web_server(self):
         def create_handler(*args, **kwargs):
             return WebViewer(self, *args, **kwargs)
-        
         def run_server():
             server = HTTPServer(('0.0.0.0', 8080), create_handler)
             self.get_logger().info(f'📡 Web interface: http://{self._get_ip()}:8080')
             server.serve_forever()
-        
         server_thread = threading.Thread(target=run_server, daemon=True)
         server_thread.start()
     
@@ -295,13 +426,16 @@ class Autoracer(Node):
         valid_ranges = [r for r in msg.ranges if 0.1 < r < 10.0]
         if valid_ranges:
             self.min_lidar_distance = min(valid_ranges)
+            if self.min_lidar_distance < 0.2 and self.current_mode != DriveMode.EMERGENCY_STOP:
+                self.current_mode = DriveMode.EMERGENCY_STOP
+                self.get_logger().warn('⚠️ EMERGENCY STOP - Obstacle too close!')
 
     def control_loop(self):
         with self.image_lock:
             if self.current_image is None:
                 return
             image = self.current_image.copy()
-        
+
         self.process_mission(image)
         self._add_debug_overlay(image)
         self.processed_frame = image
@@ -325,6 +459,11 @@ class Autoracer(Node):
                 self.get_logger().info('🚗 Obstacle detected - initiating avoidance')
         elif self.current_mode == DriveMode.OBSTACLE_AVOIDANCE:
             self._process_obstacle_avoidance(image)
+        elif self.current_mode == DriveMode.EMERGENCY_STOP:
+            self.target_speed, self.target_steering = 0.0, 0.0
+            # (비상 정지 후 복귀 로직은 원본 코드에 따라 필요시 추가)
+        elif self.current_mode == DriveMode.MISSION_COMPLETE:
+            self.target_speed, self.target_steering = 0.0, 0.0
 
     ## --- 🚦 1. 수정된 신호등 출발 기능 ---
     def _process_traffic_light(self, image):
@@ -355,7 +494,7 @@ class Autoracer(Node):
             if self.green_detection_count > 10:
                 self.traffic_light_passed = True
                 self.current_mode = DriveMode.RUBBERCON_NAVIGATION
-                self.mission_stage = 1
+                self.mission_stage = 2
                 self.get_logger().info('✅ Mission 1 Complete - Green light passed!')
         else:
             self.green_detection_count = max(0, self.green_detection_count - 1)
@@ -488,18 +627,18 @@ class Autoracer(Node):
         if self._detect_obstacle_vehicle(image):
             self.avoidance_timer = 0
             w = image.shape[1]
-            target_offset = -w / 4
+            target_offset = -w / 4 # 왼쪽으로 차선 폭의 절반만큼 회피
             self._calculate_pid_control(target_offset, DriveMode.OBSTACLE_AVOIDANCE)
         else:
             if not hasattr(self, 'avoidance_timer'):
                 self.avoidance_timer = 0
             self.avoidance_timer += 1
-            if self.avoidance_timer > 40:
+            if self.avoidance_timer > 40: # 2초 후 복귀
                 self.obstacle_avoided = True
                 self.current_mode = DriveMode.LANE_FOLLOWING
                 self.get_logger().info('✅ Obstacle avoided! Resuming lane following.')
                 self.prev_error, self.pid_integral = 0.0, 0.0
-    
+
     def _calculate_pid_control(self, error, mode):
         params = ControlParameters.PARAMS[mode]
         dt = 0.05
@@ -512,10 +651,11 @@ class Autoracer(Node):
         self.prev_error = error
     
     def _process_rubbercon(self, image):
-        # (라바콘 기능은 현재 미사용 상태로 유지)
+        # (라바콘 기능은 현재 미사용 상태이므로, 통과 처리)
         self.rubbercon_passed = True
         self.current_mode = DriveMode.LANE_FOLLOWING
-        self.get_logger().info("Skipping Rubbercon mission.")
+        self.mission_stage = 3
+        self.get_logger().info("✅ Mission 2 Complete - Skipping Rubbercon, proceeding to Lane Following.")
 
     def _draw_lane_overlay(self, original, bev_image):
         h, w = bev_image.shape[:2]
@@ -548,18 +688,39 @@ class Autoracer(Node):
             return self.processed_frame.copy() if self.processed_frame is not None else np.zeros((480, 640, 3), dtype=np.uint8)
     
     def get_stats(self):
-        # (웹 대시보드 통계 정보는 원본과 동일하게 유지)
+        # Calculate progress and current mission for the web dashboard
+        progress = 0
+        current_mission = 1
+        if self.traffic_light_passed:
+            progress = 25
+            current_mission = 2
+        if self.rubbercon_passed:
+            progress = 50
+            current_mission = 3
+        if self.current_mode == DriveMode.LANE_FOLLOWING and self.traffic_light_passed and self.rubbercon_passed:
+             progress = 75
+        if self.obstacle_avoided:
+            progress = 100
+            current_mission = 4
+        if self.mission_complete:
+            progress = 100
+            current_mission = 5
+
         return {
             'mode': self.current_mode.value,
             'speed': f'{self.current_speed:.2f}',
             'steering': f'{math.degrees(self.current_steering):.1f}',
             'fps': self.fps,
             'lidar': f'{self.min_lidar_distance:.2f}m' if self.min_lidar_distance < float('inf') else 'N/A',
-            'confidence': 0, 'progress': 0, 'current_mission': 0, 'mission_stage': 0,
+            'confidence': int(self.confidence_score),
+            'progress': progress,
+            'current_mission': current_mission,
+            'mission_stage': self.mission_stage,
             'traffic_status': self.traffic_light_state,
-            'rubbercon_status': 'SKIPPED',
-            'lane_status': 'TRACKING' if self.lane_center else 'SEARCHING',
-            'obstacle_status': self.obstacle_position if self.obstacle_position else 'CLEAR', 'alerts': []
+            'rubbercon_status': 'PASSED' if self.rubbercon_passed else 'PENDING',
+            'lane_status': 'TRACKING' if self.lane_center is not None else f'SEARCHING ({self.lane_lost_counter})',
+            'obstacle_status': 'PASSED' if self.obstacle_avoided else self.obstacle_position if self.obstacle_position else 'CLEAR',
+            'alerts': self.alerts
         }
 
 def main(args=None):
