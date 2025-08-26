@@ -1070,7 +1070,7 @@ class Autoracer(Node):
         
         if len(msg.ranges) == 0:
             return
-        
+        next
         # 전방 장애물 검사 (2023년 방식: 더 정밀)
         total_points = len(msg.ranges)
         center = total_points // 2
@@ -1113,11 +1113,11 @@ class Autoracer(Node):
                     # 조향각에 따른 적응적 속도
                     steering_magnitude = abs(self.current_steering)
                     if steering_magnitude < 0.1:  # 직선
-                        self.target_speed = 0.7  # 고속 주행
+                        self.target_speed = 0.5  # 고속 주행, 원래 0.7
                     elif steering_magnitude < 0.25:  # 완만한 곡선
-                        self.target_speed = 0.5
+                        self.target_speed = 0.25 # 수정 , 원래 0.5
                     else:  # 급커브
-                        self.target_speed = 0.3
+                        self.target_speed = 0.1 # 수정, 원래 0.3
             else:
                 # 차선을 찾지 못한 경우 - 천천히 직진하며 탐색
                 self.target_speed = 0.2
