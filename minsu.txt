@@ -301,7 +301,7 @@ class Autoracer(Node):
             if self.current_image is None:
                 return
             image = self.current_image.copy()
-
+        
         self.process_mission(image)
         self._add_debug_overlay(image)
         self.processed_frame = image
@@ -325,8 +325,8 @@ class Autoracer(Node):
                 self.get_logger().info('🚗 Obstacle detected - initiating avoidance')
         elif self.current_mode == DriveMode.OBSTACLE_AVOIDANCE:
             self._process_obstacle_avoidance(image)
-    
-    ## --- 🚦 1. 수정된 초록불 감지 로직 ---
+
+    ## --- 🚦 1. 수정된 신호등 출발 기능 ---
     def _process_traffic_light(self, image):
         h, w = image.shape[:2]
         roi = image[0:int(h * 0.4), int(w * 0.25):int(w * 0.75)]
@@ -363,7 +363,7 @@ class Autoracer(Node):
         
         self.target_speed, self.target_steering = 0.0, 0.0
 
-    ## --- 🛣️ 2. 수정된 차선 추종 로직 ---
+    ## --- 🛣️ 2. 수정된 차선 추종 및 곡선 주행 기능 ---
     def _process_lane_following(self, image):
         bev_image = cv2.warpPerspective(image, self.bev_matrix, (image.shape[1], image.shape[0]))
         lane_mask = self._detect_lanes(bev_image)
@@ -385,7 +385,6 @@ class Autoracer(Node):
             self.lane_lost_counter += 1
             self.lane_center = None
             if self.lane_lost_counter > 5:
-                # Use previous error to maintain course for a short duration
                 self._calculate_pid_control(self.prev_error * 0.5, DriveMode.LANE_FOLLOWING)
                 self.target_speed = 0.2
     
@@ -393,7 +392,6 @@ class Autoracer(Node):
 
     def _detect_lanes(self, bev_image):
         gray = cv2.cvtColor(bev_image, cv2.COLOR_BGR2GRAY)
-        # Adaptive thresholding is robust to lighting changes
         adaptive_thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, -5)
         return adaptive_thresh
 
@@ -465,6 +463,60 @@ class Autoracer(Node):
         if abs(left_fit[0] - right_fit[0]) > 0.0015: return False
         return True
 
+    ## --- 🚗 3. 장애물 회피 기능 ---
+    def _detect_obstacle_vehicle(self, image):
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        h, w = image.shape[:2]
+        lower_dark = np.array([0, 0, 0])
+        upper_dark = np.array([180, 255, 100])
+        dark_mask = cv2.inRange(hsv, lower_dark, upper_dark)
+        roi_mask = np.zeros_like(dark_mask)
+        roi_mask[h//3:h*2//3, w//4:w*3//4] = 255
+        car_mask = cv2.bitwise_and(dark_mask, roi_mask)
+        contours, _ = cv2.findContours(car_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > 1500:
+                x, y, w_box, h_box = cv2.boundingRect(contour)
+                aspect_ratio = float(w_box) / h_box if h_box > 0 else 0
+                if 1.0 < aspect_ratio < 3.5:
+                    self.obstacle_position = "CENTER"
+                    return True
+        return False
+    
+    def _process_obstacle_avoidance(self, image):
+        if self._detect_obstacle_vehicle(image):
+            self.avoidance_timer = 0
+            w = image.shape[1]
+            target_offset = -w / 4
+            self._calculate_pid_control(target_offset, DriveMode.OBSTACLE_AVOIDANCE)
+        else:
+            if not hasattr(self, 'avoidance_timer'):
+                self.avoidance_timer = 0
+            self.avoidance_timer += 1
+            if self.avoidance_timer > 40:
+                self.obstacle_avoided = True
+                self.current_mode = DriveMode.LANE_FOLLOWING
+                self.get_logger().info('✅ Obstacle avoided! Resuming lane following.')
+                self.prev_error, self.pid_integral = 0.0, 0.0
+    
+    def _calculate_pid_control(self, error, mode):
+        params = ControlParameters.PARAMS[mode]
+        dt = 0.05
+        self.pid_integral += error * dt
+        self.pid_integral = np.clip(self.pid_integral, -1000, 1000)
+        derivative = (error - self.prev_error) / dt
+        output = -(params['kp'] * error + params['ki'] * self.pid_integral + params['kd'] * derivative)
+        self.target_steering = np.clip(output, -params['max_steering'], params['max_steering'])
+        self.target_speed = params['max_speed'] * (1.0 - 0.8 * abs(self.target_steering) / params['max_steering'])
+        self.prev_error = error
+    
+    def _process_rubbercon(self, image):
+        # (라바콘 기능은 현재 미사용 상태로 유지)
+        self.rubbercon_passed = True
+        self.current_mode = DriveMode.LANE_FOLLOWING
+        self.get_logger().info("Skipping Rubbercon mission.")
+
     def _draw_lane_overlay(self, original, bev_image):
         h, w = bev_image.shape[:2]
         overlay = np.zeros_like(bev_image)
@@ -476,42 +528,20 @@ class Autoracer(Node):
             pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
             pts = np.hstack((pts_left, pts_right))
             cv2.fillPoly(overlay, np.int32([pts]), (0, 100, 0))
-
         warped_back = cv2.warpPerspective(overlay, self.inv_bev_matrix, (original.shape[1], original.shape[0]))
         result = cv2.addWeighted(original, 1, warped_back, 0.3, 0)
         np.copyto(original, result)
 
-    def _calculate_pid_control(self, error, mode):
-        params = ControlParameters.PARAMS[mode]
-        dt = 0.05
-        self.pid_integral += error * dt
-        self.pid_integral = np.clip(self.pid_integral, -1000, 1000)
-        derivative = (error - self.prev_error) / dt
-        
-        output = -(params['kp'] * error + params['ki'] * self.pid_integral + params['kd'] * derivative)
-        
-        self.target_steering = np.clip(output, -params['max_steering'], params['max_steering'])
-        self.target_speed = params['max_speed'] * (1.0 - 0.8 * abs(self.target_steering) / params['max_steering'])
-        self.prev_error = error
-
-    # (이하 함수들은 원본 구조 유지를 위해 그대로 둡니다)
-    def _process_rubbercon(self, image): pass
-    def _detect_obstacle_vehicle(self, image): return False
-    def _process_obstacle_avoidance(self, image): pass
-    
     def _add_debug_overlay(self, image):
         h, w = image.shape[:2]
-        overlay = np.zeros((100, w, 3), dtype=np.uint8)
-        cv2.addWeighted(image[:100, :], 0.3, overlay, 0.7, 0, image[:100, :])
+        cv2.rectangle(image, (0, 0), (w, 40), (0, 0, 0), -1)
+        mode_text = f"Mode: {self.current_mode.value}"
+        speed_text = f"Speed: {self.current_speed:.2f}"
+        steer_text = f"Steer: {math.degrees(self.current_steering):.1f}"
         
-        mode_text = f'MODE: {self.current_mode.value}'
-        speed_text = f'SPEED: {self.current_speed:.2f} m/s'
-        steer_text = f'STEER: {math.degrees(self.current_steering):.1f} deg'
-        
-        cv2.putText(image, mode_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.putText(image, f'FPS: {self.fps}', (w - 120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(image, speed_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        cv2.putText(image, steer_text, (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(image, mode_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(image, speed_text, (300, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(image, steer_text, (480, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
 
     def get_processed_frame(self):
         with self.image_lock:
@@ -527,9 +557,9 @@ class Autoracer(Node):
             'lidar': f'{self.min_lidar_distance:.2f}m' if self.min_lidar_distance < float('inf') else 'N/A',
             'confidence': 0, 'progress': 0, 'current_mission': 0, 'mission_stage': 0,
             'traffic_status': self.traffic_light_state,
-            'rubbercon_status': 'N/A',
+            'rubbercon_status': 'SKIPPED',
             'lane_status': 'TRACKING' if self.lane_center else 'SEARCHING',
-            'obstacle_status': 'N/A', 'alerts': []
+            'obstacle_status': self.obstacle_position if self.obstacle_position else 'CLEAR', 'alerts': []
         }
 
 def main(args=None):
