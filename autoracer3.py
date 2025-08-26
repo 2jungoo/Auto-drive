@@ -1047,7 +1047,7 @@ class Autoracer(Node):
         
         return left_line, right_line, lane_center
 
-    def find_lane_base(self, histogram, prev_base, is_left):
+def find_lane_base(self, histogram, prev_base, is_left):
         """이전 프레임 정보를 활용한 차선 베이스 찾기"""
         if prev_base > 0 and prev_base < len(histogram):
             search_range = 50
@@ -1056,3 +1056,426 @@ class Autoracer(Node):
             
             local_max_idx = np.argmax(histogram[start_idx:end_idx])
             local_max_val = histogram[start_idx + local_max_idx]
+            
+            if local_max_val > 100:
+                return start_idx + local_max_idx
+        
+        # 전체 영역에서 최댓값 찾기
+        max_idx = np.argmax(histogram)
+        if histogram[max_idx] > 50:
+            return max_idx
+        
+        # 기본값 반환
+        return len(histogram) // 2 if is_left else len(histogram) // 2
+
+    def draw_lane_overlay_2023(self, original_image, bev_image, lane_mask, left_line, right_line, lane_center):
+        """2023년 방식 차선 검출 결과 오버레이"""
+        height, width = bev_image.shape[:2]
+        
+        # BEV 결과를 컬러로 변환
+        bev_colored = cv2.cvtColor(lane_mask, cv2.COLOR_GRAY2BGR)
+        
+        # 차선 곡선 그리기
+        plot_y = np.linspace(0, height-1, height).astype(int)
+        
+        if left_line is not None:
+            left_fitx = (left_line[0] * plot_y**2 + left_line[1] * plot_y + left_line[2]).astype(int)
+            left_fitx = np.clip(left_fitx, 0, width-1)
+            left_points = np.array(list(zip(left_fitx, plot_y)), dtype=np.int32)
+            cv2.polylines(bev_colored, [left_points], False, (255, 100, 100), 8)
+        
+        if right_line is not None:
+            right_fitx = (right_line[0] * plot_y**2 + right_line[1] * plot_y + right_line[2]).astype(int)
+            right_fitx = np.clip(right_fitx, 0, width-1)
+            right_points = np.array(list(zip(right_fitx, plot_y)), dtype=np.int32)
+            cv2.polylines(bev_colored, [right_points], False, (100, 100, 255), 8)
+        
+        # 차선 사이 영역 채우기
+        if left_line is not None and right_line is not None:
+            left_fitx = (left_line[0] * plot_y**2 + left_line[1] * plot_y + left_line[2]).astype(int)
+            right_fitx = (right_line[0] * plot_y**2 + right_line[1] * plot_y + right_line[2]).astype(int)
+            left_fitx = np.clip(left_fitx, 0, width-1)
+            right_fitx = np.clip(right_fitx, 0, width-1)
+            
+            pts_left = np.array([np.transpose(np.vstack([left_fitx, plot_y]))])
+            pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, plot_y])))])
+            pts = np.hstack((pts_left, pts_right))
+            cv2.fillPoly(bev_colored, np.int_([pts]), (0, 100, 0))
+        
+        # 차선 중심선 그리기
+        if lane_center is not None:
+            center_int = int(np.clip(lane_center, 0, width-1))
+            cv2.line(bev_colored, (center_int, height//2), (center_int, height), (0, 255, 255), 6)
+        
+        # 역변환하여 원본 이미지에 오버레이
+        if self.inv_bev_matrix is not None:
+            lane_overlay = cv2.warpPerspective(bev_colored, self.inv_bev_matrix, 
+                                             (original_image.shape[1], original_image.shape[0]))
+            
+            mask = (lane_overlay.sum(axis=2) > 0).astype(np.uint8)
+            for c in range(3):
+                original_image[:,:,c] = np.where(mask, 
+                    cv2.addWeighted(original_image[:,:,c], 0.6, lane_overlay[:,:,c], 0.4, 0),
+                    original_image[:,:,c])
+        
+        # BEV 마스크 미니뷰
+        mask_resized = cv2.resize(lane_mask, (200, 150))
+        mask_colored_mini = cv2.applyColorMap(mask_resized, cv2.COLORMAP_RAINBOW)
+        x_offset = original_image.shape[1] - 210
+        y_offset = 130
+        original_image[y_offset:y_offset+150, x_offset:x_offset+200] = mask_colored_mini
+        cv2.putText(original_image, "BEV MASK", (x_offset, y_offset-10), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # 차선 상태 표시
+        if lane_center is not None:
+            cv2.putText(original_image, f"LANE CENTER: {int(lane_center)} | Conf: {self.lane_confidence:.1f}%", 
+                       (10, original_image.shape[0]-120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        else:
+            cv2.putText(original_image, "SEARCHING FOR LANE... | Applying previous control", 
+                       (10, original_image.shape[0]-120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 100, 255), 2)
+
+    def calculate_steering_control(self, error, mode):
+        """2023년 우승팀 Pure Pursuit 제어 방식"""
+        # 모드별 제어 게인
+        if mode == "RUBBERCON":
+            kp, ki, kd = 0.0035, 0.00008, 0.002
+            max_steering = 0.5
+            max_speed_factor = 0.8
+        elif mode == "LANE":
+            kp, ki, kd = 0.0025, 0.00005, 0.0018
+            max_steering = 0.35
+            max_speed_factor = 1.0
+        else:
+            kp, ki, kd = 0.002, 0.0001, 0.001
+            max_steering = 0.3
+            max_speed_factor = 0.7
+        
+        # PID 계산
+        dt = 0.05
+        self.integral_error += error * dt
+        derivative_error = (error - self.prev_error) / dt
+        
+        # 적분 windup 방지
+        integral_limit = 800
+        if abs(self.integral_error) > integral_limit:
+            self.integral_error = integral_limit * np.sign(self.integral_error)
+        
+        # PID 출력
+        steering_output = -(kp * error + ki * self.integral_error + kd * derivative_error)
+        
+        # 속도 연동 조향 제한
+        speed_factor = max(0.5, 1.0 - abs(self.current_speed) * 0.3)
+        max_steering *= speed_factor
+        
+        # 조향각 제한
+        self.target_steering = max(-max_steering, min(max_steering, steering_output))
+        self.prev_error = error
+        
+        # 속도 조정
+        steering_magnitude = abs(self.target_steering)
+        if steering_magnitude > 0.3:
+            speed_reduction = (steering_magnitude - 0.3) * 2
+            max_speed_factor *= max(0.4, 1.0 - speed_reduction)
+        
+        # 목표 속도 업데이트
+        if mode == "RUBBERCON":
+            base_speed = 0.35
+        elif mode == "LANE":
+            if steering_magnitude < 0.1:
+                base_speed = 0.5
+            elif steering_magnitude < 0.25:
+                base_speed = 0.25
+            else:
+                base_speed = 0.1
+        else:
+            base_speed = 0.2
+            
+        self.target_speed = base_speed * max_speed_factor
+
+    def draw_lidar_overlay(self, image):
+        """라이다 데이터 시각화"""
+        if self.lidar_data is None:
+            return
+        
+        height, width = image.shape[:2]
+        ranges = self.lidar_data.ranges
+        total_points = len(ranges)
+        
+        if total_points == 0:
+            return
+        
+        center = total_points // 2
+        
+        # 전방 영역 거리 계산
+        front_range = min(40, total_points // 9)
+        front_ranges = ranges[center-front_range:center+front_range]
+        valid_ranges = [r for r in front_ranges if 0.05 < r < 10.0]
+        
+        if valid_ranges:
+            avg_distance = sum(valid_ranges) / len(valid_ranges)
+            min_distance = min(valid_ranges)
+            
+            # 거리에 따른 색상 및 상태
+            if min_distance < 0.15:
+                color = (0, 0, 255)
+                status = "CRITICAL"
+            elif min_distance < 0.3:
+                color = (0, 255, 255)
+                status = "WARNING"
+            else:
+                color = (0, 255, 0)
+                status = "CLEAR"
+            
+            # 라이다 정보 패널
+            panel_width, panel_height = 280, 120
+            panel_x, panel_y = width - panel_width - 10, height - panel_height - 10
+            
+            # 반투명 배경
+            overlay = image.copy()
+            cv2.rectangle(overlay, (panel_x, panel_y), (panel_x + panel_width, panel_y + panel_height), (0, 0, 0), -1)
+            cv2.addWeighted(overlay, 0.7, image, 0.3, 0, image)
+            
+            # 텍스트 정보
+            cv2.putText(image, "LIDAR STATUS", (panel_x + 10, panel_y + 25), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(image, f"Avg Distance: {avg_distance:.2f}m", (panel_x + 10, panel_y + 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            cv2.putText(image, f"Min Distance: {min_distance:.2f}m", (panel_x + 10, panel_y + 70), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            cv2.putText(image, status, (panel_x + 10, panel_y + 95), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        
+        # 라이다 점들을 미니맵에 표시
+        self.draw_lidar_minimap(image, ranges)
+
+    def draw_lidar_minimap(self, image, ranges):
+        """라이다 데이터 미니맵"""
+        minimap_size = 120
+        minimap_x = 20
+        minimap_y = 320
+        
+        # 미니맵 배경
+        cv2.rectangle(image, (minimap_x, minimap_y), 
+                     (minimap_x + minimap_size, minimap_y + minimap_size), (50, 50, 50), -1)
+        cv2.rectangle(image, (minimap_x, minimap_y), 
+                     (minimap_x + minimap_size, minimap_y + minimap_size), (255, 255, 255), 2)
+        
+        # 중심점 (차량 위치)
+        center_x = minimap_x + minimap_size // 2
+        center_y = minimap_y + minimap_size // 2
+        cv2.circle(image, (center_x, center_y), 3, (0, 255, 0), -1)
+        
+        # 라이다 점들 그리기
+        total_points = len(ranges)
+        if total_points > 0:
+            angle_increment = 2 * math.pi / total_points
+            
+            for i, distance in enumerate(ranges):
+                if 0.05 < distance < 3.0:
+                    angle = i * angle_increment - math.pi
+                    
+                    x = int(center_x + (distance * minimap_size / 6) * math.cos(angle))
+                    y = int(center_y - (distance * minimap_size / 6) * math.sin(angle))
+                    
+                    if minimap_x <= x <= minimap_x + minimap_size and minimap_y <= y <= minimap_y + minimap_size:
+                        color = (0, 255, 255) if distance < 1.0 else (255, 255, 255)
+                        cv2.circle(image, (x, y), 1, color, -1)
+        
+        # 미니맵 제목
+        cv2.putText(image, "LIDAR", (minimap_x, minimap_y - 10), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+    def lidar_callback(self, msg):
+        """라이다 콜백 - 장애물 검출 및 응급정지"""
+        self.lidar_data = msg
+        
+        if len(msg.ranges) == 0:
+            return
+        
+        # 전방 장애물 검사
+        total_points = len(msg.ranges)
+        center = total_points // 2
+        front_range = min(25, total_points // 12)
+        
+        front_ranges = msg.ranges[center-front_range:center+front_range]
+        valid_ranges = [r for r in front_ranges if 0.05 < r < 10.0]
+        
+        if valid_ranges:
+            min_distance = min(valid_ranges)
+            
+            # 응급정지 조건 (15cm 이내)
+            if min_distance < 0.15:
+                if self.current_mode != DriveMode.EMERGENCY_STOP:
+                    self.current_mode = DriveMode.EMERGENCY_STOP
+                    self.emergency_start_time = time.time()
+                    self.get_logger().warn('EMERGENCY STOP - Obstacle detected!')
+
+    def control_loop(self):
+        """메인 제어 루프 - 20Hz"""
+        cmd = Twist()
+        
+        # 부드러운 제어를 위한 저역 통과 필터
+        alpha_speed = 0.4
+        alpha_steering = 0.6
+        
+        self.current_speed = alpha_speed * self.target_speed + (1 - alpha_speed) * self.current_speed
+        self.current_steering = alpha_steering * self.target_steering + (1 - alpha_steering) * self.current_steering
+        
+        if self.current_mode == DriveMode.TRAFFIC_LIGHT_WAIT:
+            # 신호등 대기 - 정지 상태 유지
+            if not self.traffic_light_passed:
+                self.target_speed = 0.0
+                self.target_steering = 0.0
+            
+        elif self.current_mode == DriveMode.RUBBERCON_AVOIDANCE:
+            # 라바콘 회피
+            if not hasattr(self, 'target_speed') or self.target_speed == 0:
+                self.target_speed = 0.35
+            
+        elif self.current_mode == DriveMode.LANE_FOLLOWING:
+            # 차선 추종
+            if getattr(self, 'lane_detected', False):
+                if not hasattr(self, 'target_speed') or self.target_speed == 0:
+                    steering_magnitude = abs(self.current_steering)
+                    if steering_magnitude < 0.1:
+                        self.target_speed = 0.5
+                    elif steering_magnitude < 0.25:
+                        self.target_speed = 0.25
+                    else:
+                        self.target_speed = 0.1
+            else:
+                # 차선을 찾지 못한 경우
+                self.target_speed = 0.2
+                if not hasattr(self, 'lane_search_count'):
+                    self.lane_search_count = 0
+                self.lane_search_count += 1
+                
+                if self.lane_search_count > 40:
+                    search_steering = 0.1 * math.sin(self.lane_search_count * 0.2)
+                    self.target_steering = search_steering
+                    if self.lane_search_count > 100:
+                        self.lane_search_count = 0
+        
+        elif self.current_mode == DriveMode.OBSTACLE_CAR_AVOIDANCE:
+            # 방해차량 회피 - avoid_obstacle_car에서 처리됨
+            pass
+                
+        elif self.current_mode == DriveMode.EMERGENCY_STOP:
+            # 응급정지
+            self.target_speed = 0.0
+            self.target_steering = 0.0
+            
+            # 2초 후 이전 모드로 복귀
+            if hasattr(self, 'emergency_start_time'):
+                if time.time() - self.emergency_start_time > 2.0:
+                    if not self.traffic_light_passed:
+                        self.current_mode = DriveMode.TRAFFIC_LIGHT_WAIT
+                    elif not self.rubbercon_passed:
+                        self.current_mode = DriveMode.RUBBERCON_AVOIDANCE
+                    else:
+                        self.current_mode = DriveMode.LANE_FOLLOWING
+                    
+                    delattr(self, 'emergency_start_time')
+                    self.get_logger().info('Emergency cleared - resuming mission')
+        
+        # 1회 주행 완료 체크
+        if (self.current_mode == DriveMode.LANE_FOLLOWING and 
+            self.traffic_light_passed and self.rubbercon_passed):
+            
+            # 시작 지점 근처로 돌아왔는지 체크 (간단한 예시)
+            # 실제로는 GPS나 특정 마커를 사용해야 함
+            elapsed_time = time.time() - self.mission_start_time
+            if elapsed_time > 180 and not self.one_lap_completed:  # 3분 후 (예시)
+                self.one_lap_completed = True
+                self.target_speed = 0.0
+                self.target_steering = 0.0
+                self.get_logger().info('1회 주행 완료! 미션 성공!')
+        
+        # 최종 명령 설정
+        cmd.linear.x = float(self.current_speed)
+        cmd.angular.z = float(self.current_steering)
+        
+        # 안전 제한
+        cmd.linear.x = max(0.0, min(0.8, cmd.linear.x))
+        cmd.angular.z = max(-0.6, min(0.6, cmd.angular.z))
+        
+        # 명령 발행
+        self.cmd_pub.publish(cmd)
+
+    def get_processed_frame(self):
+        """웹 스트리밍용 처리된 프레임 반환"""
+        with self.image_lock:
+            return self.processed_frame.copy() if self.processed_frame is not None else None
+
+    def get_stats(self):
+        """웹 대시보드용 통계 데이터 반환"""
+        lidar_distance = "N/A"
+        if self.lidar_data is not None and len(self.lidar_data.ranges) > 0:
+            center = len(self.lidar_data.ranges) // 2
+            front_range = min(20, len(self.lidar_data.ranges) // 10)
+            front_ranges = self.lidar_data.ranges[center-front_range:center+front_range]
+            valid_ranges = [r for r in front_ranges if 0.05 < r < 10.0]
+            if valid_ranges:
+                lidar_distance = f"{min(valid_ranges):.2f}"
+        
+        # 신호등 상태
+        traffic_light_status = "SEARCHING"
+        if self.traffic_light_passed:
+            traffic_light_status = "PASSED"
+        elif self.traffic_light_state == "GREEN":
+            traffic_light_status = f"GREEN DETECTED ({self.green_light_detection_count})"
+        elif self.traffic_light_state == "RED_OR_YELLOW":
+            traffic_light_status = "RED/YELLOW"
+        
+        # 라바콘 상태
+        rubbercon_status = "SEARCHING"
+        if self.rubbercon_passed:
+            rubbercon_status = "PASSED"
+        elif getattr(self, 'rubbercon_avoidance_active', False):
+            rubbercon_status = f"AVOIDING (Flag:{self.rubbercon_detection_flag})"
+        elif self.detection_confidence > 50:
+            rubbercon_status = "DETECTED"
+        
+        # 차선 상태
+        lane_status = "SEARCHING"
+        if getattr(self, 'lane_detected', False):
+            lane_status = f"FOLLOWING (Conf:{self.lane_confidence:.1f}%)"
+        elif hasattr(self, 'lane_confidence') and self.lane_confidence > 30:
+            lane_status = "DETECTED"
+        
+        # 방해차량 상태
+        obstacle_car_status = "NONE"
+        if self.obstacle_car_detected:
+            obstacle_car_status = f"DETECTED-{self.obstacle_car_position.upper()}"
+        elif getattr(self, 'obstacle_avoidance_active', False):
+            obstacle_car_status = "AVOIDING"
+        
+        return {
+            "current_mode": self.current_mode.value,
+            "traffic_light_status": traffic_light_status,
+            "rubbercon_status": rubbercon_status,
+            "lane_status": lane_status,
+            "obstacle_car_status": obstacle_car_status,
+            "detection_confidence": f"{self.detection_confidence:.1f}",
+            "camera_fps": self.camera_fps,
+            "lidar_distance": lidar_distance,
+            "speed": f"{self.current_speed:.2f}",
+            "steering_angle": f"{math.degrees(self.current_steering):.1f}",
+        }
+
+def main(args=None):
+    rclpy.init(args=args)
+    
+    try:
+        autoracer = Autoracer()
+        rclpy.spin(autoracer)
+    except KeyboardInterrupt:
+        print("\nAutoracer 2025 Contest Ended!")
+    finally:
+        if 'autoracer' in locals():
+            autoracer.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
