@@ -1464,18 +1464,18 @@ def find_lane_base(self, histogram, prev_base, is_left):
             "steering_angle": f"{math.degrees(self.current_steering):.1f}",
         }
 
-def main(args=None):
-    rclpy.init(args=args)
-    
-    try:
-        autoracer = Autoracer()
-        rclpy.spin(autoracer)
-    except KeyboardInterrupt:
-        print("\nAutoracer 2025 Contest Ended!")
-    finally:
-        if 'autoracer' in locals():
-            autoracer.destroy_node()
-        rclpy.shutdown()
+    def main(args=None):
+        rclpy.init(args=args)
+        
+        try:
+            autoracer = Autoracer()
+            rclpy.spin(autoracer)
+        except KeyboardInterrupt:
+            print("\nAutoracer 2025 Contest Ended!")
+        finally:
+            if 'autoracer' in locals():
+                autoracer.destroy_node()
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
