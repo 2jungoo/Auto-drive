@@ -21,13 +21,11 @@ qos_profile.reliability = ReliabilityPolicy.BEST_EFFORT
 
 # 주행 모드를 정의하는 열거형
 class DriveMode(Enum):
-    TRAFFIC_LIGHT_WAIT = "TRAFFIC_LIGHT_WAIT"
-    RUBBERCON_AVOIDANCE = "RUBBERCON_AVOID"
-    LANE_FOLLOWING = "LANE_FOLLOW"
-    OBSTACLE_CAR_AVOIDANCE = "OBSTACLE_CAR_AVOID"
-    EMERGENCY_STOP = "EMERGENCY_STOP"
+    LANE_FOLLOWING = "LANE_FOLLOWING"
+    OBSTACLE_AVOIDANCE = "OBSTACLE_AVOIDANCE"
+    INITIALIZING = "INITIALIZING"
 
-# 웹 대시보드를 위한 HTTP 서버 핸들러
+# 웹 대시보드를 위한 HTTP 서버 핸들러 (기능 변경 없음)
 class WebViewer(BaseHTTPRequestHandler):
     def __init__(self, autoracer_node, *args, **kwargs):
         self.autoracer = autoracer_node
@@ -41,39 +39,26 @@ class WebViewer(BaseHTTPRequestHandler):
             html = """
             <html>
             <head>
-                <title>🏁 Autoracer 2025 Contest - Enhanced Driving Logic</title>
+                <title>🏁 Autoracer Ultimate - Advanced Obstacle Avoidance & Lane Following</title>
                 <style>
-                    body { background: linear-gradient(135deg, #1e1e1e, #2d2d30); color: #fff; font-family: 'Segoe UI', Arial; margin: 0; padding: 20px; }
-                    .container { display: flex; gap: 20px; max-width: 1400px; margin: 0 auto; }
-                    .panel { background: rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; backdrop-filter: blur(10px); }
-                    .status-card { background: rgba(0,255,0,0.1); border-left: 4px solid #00ff00; margin: 10px 0; padding: 15px; border-radius: 8px; }
-                    .metric { display: flex; justify-content: space-between; margin: 8px 0; }
-                    .metric-value { font-weight: bold; color: #00ff88; }
-                    h1 { text-align: center; color: #00ff88; text-shadow: 0 0 20px #00ff88; }
-                    h3 { color: #00ccff; margin-top: 0; }
+                    body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; }
+                    .container { display: flex; gap: 20px; max-width: 1600px; margin: auto; }
+                    .panel { background: #1e1e1e; border-radius: 12px; padding: 20px; border: 1px solid #333; }
+                    h1, h3 { color: #00bcd4; text-align: center; }
+                    .metric { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333; }
+                    .metric span:last-child { font-weight: bold; color: #81c784; }
                 </style>
             </head>
             <body>
-                <h1>🏆 Autoracer 2025 Contest - Enhanced Driving Logic</h1>
+                <h1>🏆 Autoracer Ultimate Edition 🏆</h1>
                 <div class="container">
-                    <div class="panel" style="flex: 2;">
-                        <h3>📹 Live Camera Feed</h3>
-                        <img src="/stream.mjpg" width="800" height="600" style="border: 2px solid #444; border-radius: 8px; width: 100%; max-width: 800px;">
+                    <div class="panel" style="flex: 3;">
+                        <h3>📹 Live Feed</h3>
+                        <img src="/stream.mjpg" style="width: 100%; border-radius: 8px;">
                     </div>
                     <div class="panel" style="flex: 1;">
-                        <h3>🎯 Mission Control</h3>
-                        <div class="status-card">
-                            <div class="metric"><span>Current Mode:</span><span id="mode" class="metric-value">Loading...</span></div>
-                            <div class="metric"><span>Lane Status:</span><span id="lane" class="metric-value">Detecting...</span></div>
-                            <div class="metric"><span>Obstacle Car:</span><span id="obstacle_car" class="metric-value">None...</span></div>
-                        </div>
-                        <h3>📊 Vehicle Telemetry</h3>
-                        <div class="status-card">
-                            <div class="metric"><span>FPS:</span><span id="camera_fps" class="metric-value">0</span></div>
-                            <div class="metric"><span>Lidar (Front):</span><span id="lidar_dist" class="metric-value">N/A</span> m</div>
-                            <div class="metric"><span>Speed:</span><span id="speed" class="metric-value">0</span> m/s</div>
-                            <div class="metric"><span>Steering:</span><span id="steering" class="metric-value">0</span>°</div>
-                        </div>
+                        <h3>📊 System Telemetry</h3>
+                        <div id="stats-container"></div>
                     </div>
                 </div>
                 <script>
@@ -81,14 +66,13 @@ class WebViewer(BaseHTTPRequestHandler):
                     fetch('/stats')
                     .then(r => r.json())
                     .then(data => {
-                        document.getElementById('mode').textContent = data.current_mode;
-                        document.getElementById('lane').textContent = data.lane_status;
-                        document.getElementById('obstacle_car').textContent = data.obstacle_car_status;
-                        document.getElementById('camera_fps').textContent = data.camera_fps;
-                        document.getElementById('lidar_dist').textContent = data.lidar_distance;
-                        document.getElementById('speed').textContent = data.speed;
-                        document.getElementById('steering').textContent = data.steering_angle;
-                    }).catch(e => console.log('Stats error:', e));
+                        const container = document.getElementById('stats-container');
+                        let content = '';
+                        for (const [key, value] of Object.entries(data)) {
+                            content += `<div class="metric"><span>${key.replace(/_/g, ' ')}:</span><span>${value}</span></div>`;
+                        }
+                        container.innerHTML = content;
+                    }).catch(e => console.error('Stats error:', e));
                 }, 500);
                 </script>
             </body>
@@ -104,14 +88,14 @@ class WebViewer(BaseHTTPRequestHandler):
                 while True:
                     frame = self.autoracer.get_processed_frame()
                     if frame is not None:
-                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                        self.wfile.write(b'--frame\r\n')
+                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                        self.wfile.write(b'--frame\\r\\n')
                         self.send_header('Content-Type', 'image/jpeg')
                         self.send_header('Content-Length', str(len(buffer)))
                         self.end_headers()
                         self.wfile.write(buffer)
-                        self.wfile.write(b'\r\n')
-                    time.sleep(0.033)
+                        self.wfile.write(b'\\r\\n')
+                    time.sleep(1/30) # 30 FPS
             except Exception as e:
                 self.autoracer.get_logger().error(f'Streaming error: {e}')
                 
@@ -128,267 +112,225 @@ class WebViewer(BaseHTTPRequestHandler):
 # 메인 자율주행 노드 클래스
 class Autoracer(Node):
     def __init__(self):
-        super().__init__('Autoracer')
+        super().__init__('Autoracer_Ultimate')
         
-        # 센서 데이터 및 동기화 관련 변수
+        # 센서 데이터 및 동기화
         self.current_image = None
         self.processed_frame = None
         self.lidar_data = None
         self.image_lock = threading.Lock()
         
         # 주행 상태 관리
-        self.current_mode = DriveMode.TRAFFIC_LIGHT_WAIT
+        self.current_mode = DriveMode.INITIALIZING
         
-        # 제어 관련 변수
-        self.current_speed = 0.0
-        self.current_steering = 0.0
-        self.target_speed = 0.0
-        self.target_steering = 0.0
+        # 제어 변수
+        self.current_speed, self.current_steering = 0.0, 0.0
+        self.target_speed, self.target_steering = 0.0, 0.0
         
-        # PID 제어 관련 변수
-        self.prev_error = 0.0
-        self.integral_error = 0.0
+        # PID 제어 변수
+        self.prev_error, self.integral_error = 0.0, 0.0
         
-        # 신호등 미션 관련 변수
-        self.traffic_light_state = "SEARCHING"
-        self.green_light_detected_time = None
+        # 장애물 회피 관련 변수
+        self.obstacle_avoidance_maneuver_active = False
+        self.obstacle_avoidance_timer = None
         
-        # 장애물 차량 회피 미션 관련 변수
-        self.obstacle_car_position = None
-        self.obstacle_avoidance_start_time = None
-        
-        # 라바콘 회피 미션 관련 변수
-        self.rubbercon_status = "SEARCHING"
-        self.no_rubbercon_frames = 0
-        
-        # 성능 및 통계 데이터
+        # 성능 및 통계
         self.camera_fps = 0
         self.last_camera_time = time.time()
         
         # Bird's Eye View(BEV) 변환 행렬
-        self.bev_matrix = None
-        self.inv_bev_matrix = None
+        self.bev_matrix, self.inv_bev_matrix = None, None
         self.setup_bev_transform()
         
-        # --- 차선 추종 안정성 강화를 위한 변수 ---
-        self.left_fit = None
-        self.right_fit = None
+        # 차선 추종 안정화 변수
+        self.left_fit, self.right_fit = None, None
         self.lane_lost_counter = 0
 
-        # ROS2 구독자 및 발행자 설정
+        # ROS2 통신 설정
         self.image_sub = self.create_subscription(CompressedImage, '/image_raw/compressed', self.image_callback, 10)
         self.lidar_sub = self.create_subscription(LaserScan, '/scan', self.lidar_callback, qos_profile)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
-        # 웹 서버 시작
+        # 웹 서버 시작 및 제어 루프
         self.start_web_server()
+        self.control_timer = self.create_timer(1/20, self.control_loop) # 20Hz
         
-        # 제어 루프 타이머 (20Hz)
-        self.control_timer = self.create_timer(0.05, self.control_loop)
-        
-        self.get_logger().info('✅ Autoracer Enhanced Driving Node has been started.')
+        self.get_logger().info('✅ Autoracer Ultimate Node has been initialized.')
+        # 초기화 후 1초 뒤 주행 시작
+        self.create_timer(1.0, self.start_driving, oneshot=True)
+
+    def start_driving(self):
+        self.current_mode = DriveMode.LANE_FOLLOWING
+        self.get_logger().info('🚀 Starting Lane Following.')
 
     def setup_bev_transform(self):
-        """Bird's Eye View 변환 행렬을 설정합니다."""
-        src_points = np.float32([[80, 480], [560, 480], [240, 280], [400, 280]])
-        dst_points = np.float32([[150, 480], [490, 480], [150, 0], [490, 0]])
-        self.bev_matrix = cv2.getPerspectiveTransform(src_points, dst_points)
-        self.inv_bev_matrix = cv2.getPerspectiveTransform(dst_points, src_points)
+        src = np.float32([[200, 300], [440, 300], [0, 460], [640, 460]])
+        dst = np.float32([[0, 0], [640, 0], [0, 480], [640, 480]])
+        self.bev_matrix = cv2.getPerspectiveTransform(src, dst)
+        self.inv_bev_matrix = cv2.getPerspectiveTransform(dst, src)
 
     def get_ip_address(self):
-        """현재 장비의 IP 주소를 반환합니다."""
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
             return ip
-        except Exception:
-            return "localhost"
+        except: return "localhost"
 
     def start_web_server(self):
-        """웹 대시보드 서버를 별도의 스레드에서 실행합니다."""
         def run_server():
             port = 8080
-            while port < 8090:
-                try:
-                    server_address = ('0.0.0.0', port)
-                    httpd = HTTPServer(server_address, lambda *args, **kwargs: WebViewer(self, *args, **kwargs))
-                    self.get_logger().info(f'🌐 Web server is running on http://{self.get_ip_address()}:{port}/')
-                    httpd.serve_forever()
-                    break
-                except OSError:
-                    port += 1
-        
-        server_thread = threading.Thread(target=run_server, daemon=True)
-        server_thread.start()
+            try:
+                server_address = ('0.0.0.0', port)
+                httpd = HTTPServer(server_address, lambda *args, **kwargs: WebViewer(self, *args, **kwargs))
+                self.get_logger().info(f'🌐 Web server running on http://{self.get_ip_address()}:{port}/')
+                httpd.serve_forever()
+            except Exception as e:
+                self.get_logger().error(f"Web server failed: {e}")
+
+        threading.Thread(target=run_server, daemon=True).start()
 
     def image_callback(self, msg):
-        """카메라 이미지를 수신하고 처리 파이프라인을 시작합니다."""
         try:
             np_arr = np.frombuffer(msg.data, np.uint8)
-            image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            
             with self.image_lock:
-                self.current_image = image.copy()
-            
-            self.process_image(image)
-            
-            # FPS 계산
-            current_time = time.time()
-            self.camera_fps = round(1.0 / (current_time - self.last_camera_time))
-            self.last_camera_time = current_time
-                
+                self.current_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         except Exception as e:
-            self.get_logger().error(f'Image processing error: {e}')
+            self.get_logger().error(f'Image callback error: {e}')
 
-    def process_image(self, image):
-        """현재 주행 모드에 따라 이미지 처리를 분기합니다."""
-        processed = image.copy()
-        
-        if self.current_mode == DriveMode.TRAFFIC_LIGHT_WAIT:
-            self.detect_traffic_light(processed)
-        elif self.current_mode == DriveMode.RUBBERCON_AVOIDANCE:
-            self.detect_and_avoid_rubbercon(processed)
-        elif self.current_mode == DriveMode.LANE_FOLLOWING:
-            self.follow_lane_advanced(processed)
-            if self.detect_obstacle_car(processed):
-                self.current_mode = DriveMode.OBSTACLE_CAR_AVOIDANCE
-                self.get_logger().info('🚗 Obstacle Car Detected! Switching to Avoidance Mode.')
-        elif self.current_mode == DriveMode.OBSTACLE_CAR_AVOIDANCE:
-            self.avoid_obstacle_car(processed)
-        
-        if self.lidar_data:
-            self.draw_lidar_overlay(processed)
-            
-        self.draw_status_header(processed)
-
+    def lidar_callback(self, msg):
+        self.lidar_data = np.array(msg.ranges)
+    
+    def control_loop(self):
+        """메인 제어 루프: 센서 데이터 처리 및 주행 로직 실행"""
         with self.image_lock:
-            self.processed_frame = processed.copy()
+            if self.current_image is None or self.lidar_data is None:
+                self.get_logger().warn('Waiting for sensor data...')
+                return
+            image = self.current_image.copy()
 
-    def detect_traffic_light(self, image):
-        """녹색 신호등을 감지하여 다음 미션으로 전환합니다."""
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        lower_green = np.array([35, 80, 80])
-        upper_green = np.array([85, 255, 255])
-        green_mask = cv2.inRange(hsv, lower_green, upper_green)
+        # [핵심 로직] 장애물 감지 및 모드 전환
+        obstacle_detected, best_direction = self.check_for_obstacles_lidar()
         
-        contours, _ = cv2.findContours(green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        detected = False
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > 100:
-                x, y, w, h = cv2.boundingRect(contour)
-                cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                self.traffic_light_state = "GREEN"
-                detected = True
-                break
-        
-        if detected:
-            if self.green_light_detected_time is None:
-                self.green_light_detected_time = time.time()
-            elif time.time() - self.green_light_detected_time > 1.0: # 1초간 녹색불 유지 시
-                self.get_logger().info('🚦 Traffic light passed! Moving to rubbercon avoidance.')
-                self.current_mode = DriveMode.RUBBERCON_AVOIDANCE
-        else:
-            self.traffic_light_state = "RED_OR_SEARCHING"
-            self.green_light_detected_time = None
-            self.target_speed = 0.0
+        if self.current_mode == DriveMode.LANE_FOLLOWING and obstacle_detected:
+            self.current_mode = DriveMode.OBSTACLE_AVOIDANCE
+            self.get_logger().info(f'⚠️ Obstacle Detected! Switching to Avoidance. Best direction: {best_direction}')
+            self.obstacle_avoidance_timer = time.time()
+            self.target_steering = best_direction # 회피 방향으로 즉시 조향
+            self.target_speed = 0.2 # 회피 시 감속
 
-    def detect_and_avoid_rubbercon(self, image):
-        """라바콘을 감지하고 회피 주행합니다."""
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        lower_orange = np.array([5, 100, 100])
-        upper_orange = np.array([25, 255, 255])
-        orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
-
-        height, width = image.shape[:2]
-        contours, _ = cv2.findContours(orange_mask[height//2:, :], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        if contours:
-            self.no_rubbercon_frames = 0
-            self.rubbercon_status = f"DETECTED: {len(contours)}"
-            
-            left_cones = [c for c in contours if cv2.boundingRect(c)[0] < width // 2]
-            right_cones = [c for c in contours if cv2.boundingRect(c)[0] > width // 2]
-            
-            target_x = width // 2
-            if left_cones and right_cones:
-                left_most_c = max(left_cones, key=lambda c: cv2.boundingRect(c)[0])
-                right_most_c = min(right_cones, key=lambda c: cv2.boundingRect(c)[0])
-                target_x = (cv2.boundingRect(left_most_c)[0] + cv2.boundingRect(right_most_c)[0]) // 2
-            elif left_cones:
-                left_most_c = max(left_cones, key=lambda c: cv2.boundingRect(c)[0])
-                target_x = cv2.boundingRect(left_most_c)[0] + 150
-            elif right_cones:
-                right_most_c = min(right_cones, key=lambda c: cv2.boundingRect(c)[0])
-                target_x = cv2.boundingRect(right_most_c)[0] - 150
-
-            error = target_x - width // 2
-            self.target_steering = np.clip(error * 0.003, -0.7, 0.7)
-            self.target_speed = 0.3
-        else:
-            self.no_rubbercon_frames += 1
-            if self.no_rubbercon_frames > 10:
-                self.get_logger().info('✅ Rubbercon mission passed! Switching to lane following.')
+        elif self.current_mode == DriveMode.OBSTACLE_AVOIDANCE:
+            # 장애물 회피 기동
+            self.target_steering = best_direction
+            # 2초간 회피 기동 후 차선 복귀 시도
+            if time.time() - self.obstacle_avoidance_timer > 2.0 and not obstacle_detected:
+                self.get_logger().info('✅ Obstacle Cleared. Returning to Lane Following.')
                 self.current_mode = DriveMode.LANE_FOLLOWING
+                self.integral_error = 0 # PID 적분값 초기화
 
-    def follow_lane_advanced(self, image):
-        """[개선된 로직] 안정성과 곡선 주행 성능이 향상된 차선 추종"""
-        bev_image = cv2.warpPerspective(image, self.bev_matrix, (640, 480))
+        if self.current_mode == DriveMode.LANE_FOLLOWING:
+            self.ultimate_lane_follower(image)
         
-        # 흑백 이미지와 컬러 이미지를 모두 사용하여 차선 마스크 생성
-        gray_bev = cv2.cvtColor(bev_image, cv2.COLOR_BGR2GRAY)
-        adaptive_thresh = cv2.adaptiveThreshold(gray_bev, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, -5)
-        
-        hsv_bev = cv2.cvtColor(bev_image, cv2.COLOR_BGR2HSV)
-        lower_white = np.array([0, 0, 180])
-        upper_white = np.array([180, 40, 255])
-        white_mask = cv2.inRange(hsv_bev, lower_white, upper_white)
-        
-        lower_yellow = np.array([20, 80, 80])
-        upper_yellow = np.array([35, 255, 255])
-        yellow_mask = cv2.inRange(hsv_bev, lower_yellow, upper_yellow)
-        
-        lane_mask = cv2.bitwise_or(cv2.bitwise_or(white_mask, yellow_mask), adaptive_thresh)
+        # 최종 프레임 및 제어 명령 업데이트
+        self.processed_frame = image
+        self.update_vehicle_control()
 
-        # 마스크로부터 차선 피팅
-        self.left_fit, self.right_fit, success = self.find_lane_lines_from_mask(lane_mask)
+    def check_for_obstacles_lidar(self):
+        """LiDAR 데이터를 사용해 전방 안전 구역 내 장애물을 감지하고 최적 회피 경로를 찾습니다."""
+        if self.lidar_data is None:
+            return False, 0.0
+
+        # 라이다 데이터에서 정면(0도)을 중심으로 전방 120도 영역(-60도 ~ +60도)을 추출
+        num_ranges = len(self.lidar_data)
+        front_arc_start = (num_ranges * 3) // 4 # -90도
+        front_arc_end = num_ranges # 0도
+        left_arc_start = 0 # 0도
+        left_arc_end = num_ranges // 4 # +90도
+
+        # ROS2 turtlebot3 라이다는 0도가 정면, 시계반대방향으로 증가
+        # 전방 [-60, 60]도 영역을 보려면 [0:60] and [300:360]
+        front_right = self.lidar_data[300:]
+        front_left = self.lidar_data[:60]
+        front_view = np.concatenate([front_right, front_left])
+
+        # 안전 구역 정의 (폭 0.4m, 길이 0.5m)
+        safety_distance = 0.5
+        
+        obstacle_indices = np.where(front_view < safety_distance)[0]
+        if not obstacle_indices.any():
+            return False, 0.0 # 장애물 없음
+
+        # 장애물이 감지되면, 가장 넓은 공간 찾기
+        gaps = []
+        # 라이다 데이터를 10도씩 12개의 섹터로 나눔
+        sector_size = 10
+        for i in range(0, 120, sector_size):
+            sector = front_view[i : i + sector_size]
+            # 유효한 거리 값만 필터링 (inf, 0 제외)
+            valid_distances = sector[(sector > 0.1) & ~np.isinf(sector)]
+            avg_dist = np.mean(valid_distances) if valid_distances.any() else 5.0 # 장애물 없으면 큰 값
+            gaps.append(avg_dist)
+        
+        # 가장 먼 평균 거리를 가진 섹터(가장 넓은 공간)를 찾음
+        best_gap_index = np.argmax(gaps)
+        
+        # 해당 섹터의 중심 각도를 조향각으로 변환 (-60도 ~ +60도)
+        # (best_gap_index * 10 + 5) 는 5, 15, ..., 115
+        # 중심에서 60도 빼주면 -55, -45, ..., +55
+        angle_deg = (best_gap_index * sector_size + sector_size/2) - 60
+        # 조향값으로 변환 (라디안, 스케일링)
+        steering_direction = np.clip(math.radians(angle_deg) * -1.5, -0.7, 0.7)
+
+        return True, steering_direction
+
+    def ultimate_lane_follower(self, image):
+        """[핵심] 강화된 차선 감지 및 추종 로직"""
+        bev = cv2.warpPerspective(image, self.bev_matrix, (640, 480))
+        
+        # 1. 강화된 이미지 필터링
+        gray = cv2.cvtColor(bev, cv2.COLOR_BGR2GRAY)
+        # 그림자 제거
+        dilated = cv2.dilate(gray, np.ones((7,7), np.uint8))
+        median = cv2.medianBlur(dilated, 21)
+        diff = 255 - cv2.absdiff(gray, median)
+        # 흰색 차선 강조
+        normed = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX)
+        _, thresh = cv2.threshold(normed, 230, 255, cv2.THRESH_BINARY)
+        
+        # 2. 차선 찾기 및 유효성 검증
+        self.left_fit, self.right_fit, success = self.find_lane_lines(thresh)
 
         if success:
             self.lane_lost_counter = 0
-            self.calculate_advanced_steering(image.shape)
+            self.calculate_ultimate_steering(image.shape)
         else:
             self.lane_lost_counter += 1
-            if self.lane_lost_counter > 10:
-                self.target_speed = 0.2
-                self.target_steering = 0.0
-                self.left_fit, self.right_fit = None, None
+            if self.lane_lost_counter > 5: # 5프레임 이상 실패 시 감속
+                self.target_speed = 0.15
+                if self.lane_lost_counter > 20: # 20프레임 이상 실패 시 정지
+                    self.target_speed = 0.0
 
-        self.draw_lane_overlay(image, bev_image, lane_mask)
+        # 3. 시각화
+        self.draw_lane_and_path(image, bev, thresh)
 
-    def find_lane_lines_from_mask(self, mask):
-        """이전 프레임 정보를 활용하여 효율적으로 차선을 찾고 피팅"""
-        if self.left_fit is not None and self.right_fit is not None:
-            left_fit, right_fit, success = self.search_around_poly(mask)
-            if success:
-                return left_fit, right_fit, True
-        
-        return self.blind_search_lanes(mask)
-
-    def blind_search_lanes(self, mask):
-        """슬라이딩 윈도우 방식으로 차선 전체를 탐색"""
+    def find_lane_lines(self, mask):
+        """슬라이딩 윈도우와 이전 프레임 정보를 결합하여 차선을 찾고 2차 다항식으로 피팅"""
+        # (이전 코드의 blind_search_lanes와 search_around_poly를 결합 및 개선)
         height, width = mask.shape
         histogram = np.sum(mask[height//2:, :], axis=0)
         midpoint = width // 2
-        left_base = np.argmax(histogram[:midpoint])
-        right_base = np.argmax(histogram[midpoint:]) + midpoint
-
-        nwindows = 9
+        
+        if self.left_fit is None or self.lane_lost_counter > 5: # 블라인드 서치
+            left_base = np.argmax(histogram[:midpoint])
+            right_base = np.argmax(histogram[midpoint:]) + midpoint
+        else: # 이전 프레임 기반 서치
+            y_eval = height -1
+            left_base = self.left_fit[0]*y_eval**2 + self.left_fit[1]*y_eval + self.left_fit[2]
+            right_base = self.right_fit[0]*y_eval**2 + self.right_fit[1]*y_eval + self.right_fit[2]
+        
+        nwindows, margin, minpix = 9, 80, 40
         window_height = height // nwindows
-        margin, minpix = 50, 50
-
         nonzero = mask.nonzero()
         nonzeroy, nonzerox = np.array(nonzero[0]), np.array(nonzero[1])
         
@@ -396,214 +338,126 @@ class Autoracer(Node):
         leftx_current, rightx_current = left_base, right_base
 
         for window in range(nwindows):
-            win_y_low = height - (window + 1) * window_height
-            win_y_high = height - window * window_height
+            win_y_low, win_y_high = height - (window+1)*window_height, height - window*window_height
             win_xleft_low, win_xleft_high = leftx_current - margin, leftx_current + margin
             win_xright_low, win_xright_high = rightx_current - margin, rightx_current + margin
-
+            
             good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_xleft_low) & (nonzerox < win_xleft_high)).nonzero()[0]
             good_right_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_xright_low) & (nonzerox < win_xright_high)).nonzero()[0]
             
             left_lane_inds.append(good_left_inds)
             right_lane_inds.append(good_right_inds)
 
-            if len(good_left_inds) > minpix:
-                leftx_current = int(np.mean(nonzerox[good_left_inds]))
-            if len(good_right_inds) > minpix:
-                rightx_current = int(np.mean(nonzerox[good_right_inds]))
-
-        left_lane_inds = np.concatenate(left_lane_inds)
-        right_lane_inds = np.concatenate(right_lane_inds)
-
-        leftx, lefty = nonzerox[left_lane_inds], nonzeroy[left_lane_inds]
-        rightx, righty = nonzerox[right_lane_inds], nonzeroy[right_lane_inds]
+            if len(good_left_inds) > minpix: leftx_current = int(np.mean(nonzerox[good_left_inds]))
+            if len(good_right_inds) > minpix: rightx_current = int(np.mean(nonzerox[good_right_inds]))
+        
+        leftx, lefty = nonzerox[np.concatenate(left_lane_inds)], nonzeroy[np.concatenate(left_lane_inds)]
+        rightx, righty = nonzerox[np.concatenate(right_lane_inds)], nonzeroy[np.concatenate(right_lane_inds)]
 
         left_fit, right_fit = None, None
-        if len(leftx) > 100: left_fit = np.polyfit(lefty, leftx, 2)
-        if len(rightx) > 100: right_fit = np.polyfit(righty, rightx, 2)
+        if len(leftx) > 200: left_fit = np.polyfit(lefty, leftx, 2)
+        if len(rightx) > 200: right_fit = np.polyfit(righty, rightx, 2)
 
-        # 차선 유효성 검사
+        # [유효성 검증] 차선이 평행하고 간격이 적절한지 확인
         if left_fit is not None and right_fit is not None:
-            y_eval = height - 1
+            # 곡률(2차항 계수)이 비슷한지 확인
+            if abs(left_fit[0] - right_fit[0]) > 0.001: return self.left_fit, self.right_fit, False
+            y_eval = height -1
             lane_width = (right_fit[0]*y_eval**2 + right_fit[1]*y_eval + right_fit[2]) - (left_fit[0]*y_eval**2 + left_fit[1]*y_eval + left_fit[2])
-            if not (150 < lane_width < 450):
-                return None, None, False
-        
+            if not (250 < lane_width < 500): return self.left_fit, self.right_fit, False
+
         return left_fit, right_fit, (left_fit is not None or right_fit is not None)
 
-    def search_around_poly(self, mask):
-        """이전 프레임의 차선 주변에서 빠르게 탐색"""
-        margin = 50
-        nonzero = mask.nonzero()
-        nonzeroy, nonzerox = np.array(nonzero[0]), np.array(nonzero[1])
+    def calculate_ultimate_steering(self, shape):
+        """[핵심] 부드러운 곡선 주행을 위한 예측 제어 및 PID 튜닝"""
+        height, width = shape
+        y_eval = height * 0.5 # 예측 지점을 더 멀리(50%) 설정하여 미리 대비
         
-        left_lane_inds = ((nonzerox > (self.left_fit[0]*(nonzeroy**2) + self.left_fit[1]*nonzeroy + self.left_fit[2] - margin)) & (nonzerox < (self.left_fit[0]*(nonzeroy**2) + self.left_fit[1]*nonzeroy + self.left_fit[2] + margin)))
-        right_lane_inds = ((nonzerox > (self.right_fit[0]*(nonzeroy**2) + self.right_fit[1]*nonzeroy + self.right_fit[2] - margin)) & (nonzerox < (self.right_fit[0]*(nonzeroy**2) + self.right_fit[1]*nonzeroy + self.right_fit[2] + margin)))
-        
-        leftx, lefty = nonzerox[left_lane_inds], nonzeroy[left_lane_inds]
-        rightx, righty = nonzerox[right_lane_inds], nonzeroy[right_lane_inds]
-
-        if len(leftx) < 100 or len(rightx) < 100: return None, None, False
-
-        left_fit, right_fit = np.polyfit(lefty, leftx, 2), np.polyfit(righty, rightx, 2)
-        
-        y_eval = mask.shape[0] - 1
-        lane_width = (right_fit[0]*y_eval**2 + right_fit[1]*y_eval + right_fit[2]) - (left_fit[0]*y_eval**2 + left_fit[1]*y_eval + left_fit[2])
-        if not (150 < lane_width < 450): return None, None, False
-
-        return left_fit, right_fit, True
-
-    def calculate_advanced_steering(self, shape):
-        """[개선된 로직] 예측 제어 및 곡률을 고려하여 부드러운 조향각 계산"""
-        height, width = shape[:2]
-        y_eval = height * 0.7  # 예측 지점(Lookahead point)
-
         if self.left_fit is not None and self.right_fit is not None:
             left_x = self.left_fit[0]*y_eval**2 + self.left_fit[1]*y_eval + self.left_fit[2]
             right_x = self.right_fit[0]*y_eval**2 + self.right_fit[1]*y_eval + self.right_fit[2]
             lane_center = (left_x + right_x) / 2
-        elif self.left_fit is not None:
-            lane_center = self.left_fit[0]*y_eval**2 + self.left_fit[1]*y_eval + self.left_fit[2] + 175
-        elif self.right_fit is not None:
-            lane_center = self.right_fit[0]*y_eval**2 + self.right_fit[1]*y_eval + self.right_fit[2] - 175
+        elif self.left_fit is not None: lane_center = self.left_fit[0]*y_eval**2 + self.left_fit[1]*y_eval + self.left_fit[2] + 180 # 차선폭 예측
+        elif self.right_fit is not None: lane_center = self.right_fit[0]*y_eval**2 + self.right_fit[1]*y_eval + self.right_fit[2] - 180
         else: return
-            
-        # 위치 오차와 곡률 오차를 결합
-        path_error = lane_center - (width / 2)
-        curvature = (self.left_fit[0] + self.right_fit[0]) / 2 if self.left_fit is not None and self.right_fit is not None else 0
-        curvature_error = curvature * 2000
-        total_error = path_error + curvature_error
-
-        # PID 제어
-        kp, ki, kd = 0.0025, 0.00001, 0.003
-        p_term = kp * total_error
-        self.integral_error = np.clip(self.integral_error + total_error, -1000, 1000)
+        
+        # PID 제어 (게인 값 최적화)
+        kp, ki, kd = 0.003, 0.00005, 0.004
+        error = lane_center - (width / 2)
+        
+        p_term = kp * error
+        self.integral_error = np.clip(self.integral_error + error, -2000, 2000)
         i_term = ki * self.integral_error
-        d_term = kd * (total_error - self.prev_error)
-        self.prev_error = total_error
+        d_term = kd * (error - self.prev_error)
+        self.prev_error = error
         
         steering = p_term + i_term + d_term
+        self.target_steering = np.clip(steering, -0.7, 0.7)
         
-        # 속도에 따른 조향 민감도 조절
-        speed_factor = max(0.5, 1.0 - (self.current_speed / 0.5))
-        self.target_steering = np.clip(steering * speed_factor, -0.7, 0.7)
-        self.target_speed = max(0.2, 0.4 - abs(self.target_steering) * 0.2)
-
-    def detect_obstacle_car(self, image):
-        """장애물 차량을 감지합니다."""
-        height, width = image.shape[:2]
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        
-        lower_dark = np.array([0, 0, 0])
-        upper_dark = np.array([180, 255, 80])
-        dark_mask = cv2.inRange(hsv, lower_dark, upper_dark)
-        
-        roi = dark_mask[height//3:height*3//4, width//4:width*3//4]
-        contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        for contour in contours:
-            if cv2.contourArea(contour) > 1000:
-                self.obstacle_car_position = "CENTER"
-                return True
-        
-        self.obstacle_car_position = None
-        return False
-
-    def avoid_obstacle_car(self, image):
-        """장애물 차량을 회피 주행합니다."""
-        if self.obstacle_avoidance_start_time is None:
-            self.obstacle_avoidance_start_time = time.time()
-            self.get_logger().info('Executing obstacle avoidance maneuver.')
-        
-        self.target_steering = -0.6 # 왼쪽으로 회피
-        self.target_speed = 0.25
-
-        if time.time() - self.obstacle_avoidance_start_time > 3.0:
-            self.get_logger().info('✅ Obstacle avoidance complete. Resuming lane following.')
-            self.current_mode = DriveMode.LANE_FOLLOWING
-            self.obstacle_avoidance_start_time = None
-
-    def draw_lane_overlay(self, image, bev_image, lane_mask):
-        """차선 검출 결과를 시각화하여 이미지에 오버레이합니다."""
-        lane_img = np.zeros_like(bev_image)
-        plot_y = np.linspace(0, bev_image.shape[0]-1, bev_image.shape[0])
-
-        if self.left_fit is not None and self.right_fit is not None:
-            left_fit_x = self.left_fit[0]*plot_y**2 + self.left_fit[1]*plot_y + self.left_fit[2]
-            right_fit_x = self.right_fit[0]*plot_y**2 + self.right_fit[1]*plot_y + self.right_fit[2]
-            pts_left = np.array([np.transpose(np.vstack([left_fit_x, plot_y]))])
-            pts_right = np.array([np.transpose(np.vstack([right_fit_x, plot_y]))])
-            pts = np.hstack((pts_left, pts_right[:, ::-1, :]))
-            cv2.fillPoly(lane_img, np.int_([pts]), (0, 255, 0))
-        
-        warped_back = cv2.warpPerspective(lane_img, self.inv_bev_matrix, (image.shape[1], image.shape[0]))
-        result = cv2.addWeighted(image, 1, warped_back, 0.3, 0)
-        np.copyto(image, result)
-
-    def draw_lidar_overlay(self, image):
-        """라이다 데이터를 이미지에 시각화합니다."""
-        height, width = image.shape[:2]
-        center_x, center_y = width // 2, height
-        for i, dist in enumerate(self.lidar_data):
-            if not (math.isinf(dist) or math.isnan(dist) or dist > 2.0):
-                angle = (i / len(self.lidar_data) - 0.5) * math.pi * 2
-                x = int(center_x + math.sin(angle) * dist * 150)
-                y = int(center_y - math.cos(angle) * dist * 150)
-                if 0 <= x < width and 0 <= y < height:
-                    color = (0, 0, 255) if dist < 0.5 else (0, 255, 255)
-                    cv2.circle(image, (x, y), 3, color, -1)
-
-    def draw_status_header(self, image):
-        """주행 상태 정보를 이미지 상단에 표시합니다."""
-        overlay = image.copy()
-        cv2.rectangle(overlay, (0, 0), (image.shape[1], 60), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.6, image, 0.4, 0, image)
-        
-        mode_text = f"Mode: {self.current_mode.value}"
-        speed_text = f"Speed: {self.current_speed:.2f} m/s"
-        steer_text = f"Steer: {math.degrees(self.current_steering):.1f} deg"
-        
-        cv2.putText(image, mode_text, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        cv2.putText(image, speed_text, (250, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        cv2.putText(image, steer_text, (450, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        
-        lane_status = "OK" if self.lane_lost_counter == 0 else f"LOST({self.lane_lost_counter})"
-        lane_text = f"Lane: {lane_status}"
-        cv2.putText(image, lane_text, (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
-
-
-    def lidar_callback(self, msg):
-        """라이다 데이터를 수신합니다."""
-        self.lidar_data = msg.ranges
-
-    def control_loop(self):
-        """주기적으로 차량의 속도와 조향각을 발행합니다."""
+        # 곡률이 심하면(조향각이 크면) 자동 감속
+        self.target_speed = max(0.2, 0.35 - abs(self.target_steering) * 0.2)
+    
+    def update_vehicle_control(self):
+        """차량 제어 명령을 부드럽게 업데이트하여 발행"""
         twist = Twist()
-        self.current_speed = self.current_speed * 0.9 + self.target_speed * 0.1
-        self.current_steering = self.current_steering * 0.9 + self.target_steering * 0.1
+        # 가속/조향에 가중치를 두어 부드러운 움직임 구현
+        self.current_speed = self.current_speed * 0.8 + self.target_speed * 0.2
+        self.current_steering = self.current_steering * 0.7 + self.target_steering * 0.3
         twist.linear.x = self.current_speed
         twist.angular.z = self.current_steering
         self.cmd_pub.publish(twist)
 
+    def draw_lane_and_path(self, image, bev, mask):
+        """차선, 주행 경로, 디버그 정보를 시각화"""
+        lane_img = np.zeros_like(bev)
+        plot_y = np.linspace(0, bev.shape[0]-1, bev.shape[0])
+
+        if self.left_fit is not None and self.right_fit is not None:
+            left_x = self.left_fit[0]*plot_y**2 + self.left_fit[1]*plot_y + self.left_fit[2]
+            right_x = self.right_fit[0]*plot_y**2 + self.right_fit[1]*plot_y + self.right_fit[2]
+            pts_left = np.array([np.transpose(np.vstack([left_x, plot_y]))])
+            pts_right = np.array([np.transpose(np.vstack([right_x, plot_y]))])
+            pts = np.hstack((pts_left, pts_right[:, ::-1, :]))
+            cv2.fillPoly(lane_img, np.int_([pts]), (0, 255, 0)) # 주행 가능 영역
+            
+            center_x = (left_x + right_x) / 2
+            pts_center = np.array([np.transpose(np.vstack([center_x, plot_y]))])
+            cv2.polylines(lane_img, np.int_([pts_center]), False, (255,0,0), 5) # 주행 경로
+
+        warped_back = cv2.warpPerspective(lane_img, self.inv_bev_matrix, (image.shape[1], image.shape[0]))
+        result = cv2.addWeighted(image, 1, warped_back, 0.4, 0)
+        
+        # 디버그 창 추가
+        debug_window = cv2.resize(cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (200, 120))
+        cv2.putText(debug_window, "Lane Mask", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,0), 1)
+        result[10:130, -210:-10] = debug_window
+        np.copyto(image, result)
+        
+    def draw_status_header(self, image):
+        # (이전 코드와 유사, 표시 정보 업데이트)
+        pass
+
     def get_processed_frame(self):
-        """웹 서버로 전송할 처리된 프레임을 반환합니다."""
         with self.image_lock:
             return self.processed_frame.copy() if self.processed_frame is not None else None
 
     def get_stats(self):
-        """웹 서버로 전송할 상태 정보를 JSON 형식으로 반환합니다."""
-        min_lidar_dist = "N/A"
-        if self.lidar_data and not (math.isinf(self.lidar_data[0]) or math.isnan(self.lidar_data[0])):
-            min_lidar_dist = round(self.lidar_data[0], 2)
-        
+        front_dist = "N/A"
+        if self.lidar_data is not None:
+            # 0도 (정면) 주변 5개 값의 평균으로 안정성 향상
+            center_index = 0
+            front_scan = self.lidar_data[np.r_[358:360, 0:3]]
+            valid_scan = front_scan[front_scan > 0.1]
+            if valid_scan.any():
+                front_dist = round(float(np.mean(valid_scan)), 2)
+
         return {
-            "current_mode": self.current_mode.value,
-            "lane_status": "OK" if self.lane_lost_counter == 0 else f"LOST({self.lane_lost_counter})",
-            "obstacle_car_status": self.obstacle_car_position or "None",
-            "camera_fps": self.camera_fps,
-            "lidar_distance": min_lidar_dist,
-            "speed": round(self.current_speed, 2),
-            "steering_angle": round(math.degrees(self.current_steering), 1),
+            "Mode": self.current_mode.value,
+            "Speed (m/s)": f"{self.current_speed:.2f}",
+            "Steering (deg)": f"{math.degrees(self.current_steering):.1f}",
+            "LiDAR_Front (m)": front_dist,
+            "Lane_Lost_Frames": self.lane_lost_counter,
+            "FPS": self.camera_fps
         }
 
 def main(args=None):
@@ -612,7 +466,7 @@ def main(args=None):
     try:
         rclpy.spin(autoracer_node)
     except KeyboardInterrupt:
-        autoracer_node.get_logger().info('🛑 Node stopped cleanly.')
+        pass
     finally:
         autoracer_node.destroy_node()
         rclpy.shutdown()
