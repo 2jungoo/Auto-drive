@@ -662,51 +662,103 @@ class Autoracer(Node):
         cv2.putText(image, f'CONFIDENCE: {self.confidence_score:.1f}% | LIDAR: {self.min_lidar_distance:.2f}m', 
                    (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
     
-    def _process_traffic_light(self, image):
-        """Mission 1: Traffic light detection"""
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        
-        # Detect green light
-        green_mask = cv2.inRange(hsv, self.color_ranges['green']['lower'], 
-                                self.color_ranges['green']['upper'])
-        
-        # Noise reduction
-        kernel = np.ones((5, 5), np.uint8)
-        green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_OPEN, kernel)
-        green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_CLOSE, kernel)
-        
-        # Count green pixels
-        green_pixels = np.sum(green_mask > 0)
-        
-        # Visualization
-        h, w = image.shape[:2]
-        roi_display = cv2.resize(green_mask, (160, 120))
-        roi_colored = cv2.applyColorMap(roi_display, cv2.COLORMAP_JET)
-        image[10:130, w-170:w-10] = roi_colored
-        
-        # Detection logic
-        if green_pixels > 5000:  # Threshold for green detection
-            self.green_detection_count += 1
-            self.traffic_light_state = "GREEN"
-            self.confidence_score = min(100, green_pixels / 100)
-            
-            cv2.putText(image, f"GREEN LIGHT DETECTED ({self.green_detection_count})", 
-                       (10, h-30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
-            # Start after consistent detection
-            if self.green_detection_count > 15:
-                self.traffic_light_passed = True
-                self.current_mode = DriveMode.RUBBERCON_NAVIGATION
-                self.mission_stage = 1
-                self.get_logger().info('✅ Mission 1 complete - Green light detected!')
-        else:
-            self.green_detection_count = max(0, self.green_detection_count - 1)
-            self.traffic_light_state = "WAITING"
-            self.confidence_score = 0
-            
-            cv2.putText(image, "WAITING FOR GREEN LIGHT", 
-                       (10, h-30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+def _process_traffic_light(self, image):
+    """Mission 1: Traffic light detection - Fixed for top-mounted traffic light"""
+    h, w = image.shape[:2]
     
+    # Define ROI for traffic light at the top of the frame
+    roi_y_start = 0
+    roi_y_end = h // 3  # Top third of the image
+    roi_x_start = w // 4  # Center portion horizontally
+    roi_x_end = w * 3 // 4
+    
+    # Extract ROI
+    roi = image[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+    hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    
+    # Detect green light with adjusted parameters for better detection
+    green_mask = cv2.inRange(hsv_roi, 
+                            np.array([40, 50, 50]),   # Lower threshold - more permissive
+                            np.array([80, 255, 255])) # Upper threshold
+    
+    # Noise reduction
+    kernel = np.ones((3, 3), np.uint8)
+    green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_OPEN, kernel)
+    green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_CLOSE, kernel)
+    
+    # Find contours to identify circular green light
+    contours, _ = cv2.findContours(green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    green_detected = False
+    largest_green_area = 0
+    
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area > 100:  # Minimum area for green light
+            # Check if contour is roughly circular
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter > 0:
+                circularity = 4 * np.pi * area / (perimeter * perimeter)
+                
+                if circularity > 0.3:  # Reasonably circular
+                    x, y, w_box, h_box = cv2.boundingRect(contour)
+                    aspect_ratio = float(w_box) / h_box if h_box > 0 else 0
+                    
+                    # Traffic light should be roughly square/circular
+                    if 0.5 < aspect_ratio < 2.0:
+                        green_detected = True
+                        largest_green_area = max(largest_green_area, area)
+                        
+                        # Draw detection on original image
+                        actual_x = roi_x_start + x
+                        actual_y = roi_y_start + y
+                        cv2.rectangle(image, (actual_x, actual_y), 
+                                    (actual_x + w_box, actual_y + h_box), 
+                                    (0, 255, 0), 3)
+                        cv2.putText(image, "GREEN LIGHT", 
+                                  (actual_x, actual_y - 10), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    
+    # Draw ROI rectangle for debugging
+    cv2.rectangle(image, (roi_x_start, roi_y_start), 
+                 (roi_x_end, roi_y_end), (255, 255, 0), 2)
+    cv2.putText(image, "TRAFFIC LIGHT ROI", 
+               (roi_x_start, roi_y_start - 10), 
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    
+    # Visualization of detection mask (smaller display)
+    roi_display = cv2.resize(green_mask, (120, 90))
+    roi_colored = cv2.applyColorMap(roi_display, cv2.COLORMAP_JET)
+    image[10:100, w-130:w-10] = roi_colored
+    
+    # Detection logic with improved stability
+    if green_detected and largest_green_area > 200:  # Minimum significant area
+        self.green_detection_count += 1
+        self.traffic_light_state = "GREEN"
+        self.confidence_score = min(100, (largest_green_area / 10))  # Scale confidence
+        
+        cv2.putText(image, f"GREEN DETECTED! Count: {self.green_detection_count}", 
+                   (10, h-60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.putText(image, f"Area: {int(largest_green_area)} | Confidence: {self.confidence_score:.1f}%", 
+                   (10, h-30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        # Start after consistent detection (reduced threshold for faster response)
+        if self.green_detection_count > 8:  # Reduced from 15 to 8
+            self.traffic_light_passed = True
+            self.current_mode = DriveMode.RUBBERCON_NAVIGATION
+            self.mission_stage = 1
+            self.get_logger().info('✅ Mission 1 complete - Green light detected!')
+    else:
+        # Decay counter more slowly to avoid flickering
+        self.green_detection_count = max(0, self.green_detection_count - 1)
+        self.traffic_light_state = "WAITING"
+        self.confidence_score *= 0.9  # Gradual confidence decay
+        
+        cv2.putText(image, "WAITING FOR GREEN LIGHT", 
+                   (10, h-60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        cv2.putText(image, f"Scanning... Count: {self.green_detection_count}", 
+                   (10, h-30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
     def _process_rubbercon(self, image):
         """Mission 2: Rubbercon navigation"""
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
