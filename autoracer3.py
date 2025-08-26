@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 
 import rclpy
@@ -434,108 +435,69 @@ class Autoracer(Node):
             fill_width = int((progress / 100) * progress_width)
             cv2.rectangle(image, (10, 125), (10 + fill_width, 125 + progress_height), (0, 255, 0), -1)
 
-    def detect_traffic_light(self, image):
-        """신호등 녹색불 감지 - NEW for 2025"""
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+def detect_traffic_light(self, image):
+    """신호등 녹색불 감지 - 단순화된 방식"""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    
+    # autoracer5.py의 단순한 녹색 범위
+    lower_green = np.array([35, 100, 100])
+    upper_green = np.array([85, 255, 255])
+    green_mask = cv2.inRange(hsv, lower_green, upper_green)
+    
+    # 노이즈 제거
+    kernel = np.ones((3, 3), np.uint8)
+    green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_OPEN, kernel, iterations=2)
+    green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    
+    # 녹색 영역의 총 픽셀 수 계산 (autoracer5 방식)
+    green_pixel_count = np.sum(green_mask)
+    
+    # 시각화
+    height, width = image.shape[:2]
+    
+    # 마스크를 컬러로 변환해서 표시
+    mask_resized = cv2.resize(green_mask, (160, 120))
+    mask_colored = cv2.applyColorMap(mask_resized, cv2.COLORMAP_JET)
+    image[10:130, 10:170] = mask_colored
+    
+    # 녹색 영역이 충분히 크면 신호등으로 인식
+    if green_pixel_count > 100000:  # autoracer5의 임계값 사용
+        self.traffic_light_state = "GREEN"
+        self.green_light_detection_count += 1
+        self.traffic_light_confidence = min(100, green_pixel_count / 2000)
         
-        # 녹색 신호등 HSV 범위 설정
-        # 첫 번째 녹색 범위 (기본)
-        lower_green1 = np.array([40, 50, 50])
-        upper_green1 = np.array([80, 255, 255])
-        
-        # 두 번째 녹색 범위 (밝은 녹색)
-        lower_green2 = np.array([35, 100, 100])
-        upper_green2 = np.array([85, 255, 255])
-        
-        # 마스크 생성 및 결합
-        green_mask1 = cv2.inRange(hsv, lower_green1, upper_green1)
-        green_mask2 = cv2.inRange(hsv, lower_green2, upper_green2)
-        green_mask = cv2.bitwise_or(green_mask1, green_mask2)
-        
-        # 노이즈 제거
-        kernel = np.ones((5, 5), np.uint8)
-        green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_OPEN, kernel, iterations=2)
-        green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-        
-        # 관심 영역 설정 (화면 상단 1/3)
-        height, width = image.shape[:2]
-        roi_mask = np.zeros_like(green_mask)
-        roi_mask[0:height//3, :] = 255
-        green_mask = cv2.bitwise_and(green_mask, roi_mask)
-        
-        # 컨투어 검출
-        contours, _ = cv2.findContours(green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # 신호등 후보 필터링
-        green_lights = []
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > 50:  # 최소 면적
-                x, y, w, h = cv2.boundingRect(contour)
-                aspect_ratio = float(w) / h
-                
-                # 원형에 가까운 형태 (신호등 특성)
-                if 0.7 < aspect_ratio < 1.3 and area > 100:
-                    # 원형도 검사
-                    perimeter = cv2.arcLength(contour, True)
-                    if perimeter > 0:
-                        circularity = 4 * math.pi * area / (perimeter * perimeter)
-                        if circularity > 0.5:  # 충분히 원형
-                            green_lights.append({
-                                'x': x, 'y': y, 'w': w, 'h': h,
-                                'center_x': x + w // 2,
-                                'center_y': y + h // 2,
-                                'area': area,
-                                'confidence': area * circularity
-                            })
-                            
-                            # 시각화
-                            cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 3)
-                            cv2.putText(image, f'GREEN LIGHT({area:.0f})', (x, y - 10), 
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                            cv2.circle(image, (x + w // 2, y + h // 2), 5, (0, 255, 0), -1)
-        
-        # 신뢰도 높은 녹색 신호등만 선택
-        green_lights.sort(key=lambda x: x['confidence'], reverse=True)
-        
-        if len(green_lights) > 0:
-            best_light = green_lights[0]
-            self.traffic_light_confidence = min(100, best_light['confidence'] / 20)
-            self.green_light_detection_count += 1
+        # 일정 횟수 이상 감지되면 출발
+        if self.green_light_detection_count > 10:  # 기존보다 낮춤
+            if self.green_light_detected_time is None:
+                self.green_light_detected_time = time.time()
+                self.get_logger().info('🟢 Green light detected! Starting to move...')
             
-            # 녹색불이 일정 시간 이상 지속적으로 감지되면 출발
-            if self.green_light_detection_count > 15:  # 약 0.75초 (20Hz * 15)
-                if self.green_light_detected_time is None:
-                    self.green_light_detected_time = time.time()
-                    self.get_logger().info('🟢 Green light detected! Starting to move...')
-                
-                # 녹색불 감지 후 즉시 다음 미션으로 전환
-                if time.time() - self.green_light_detected_time > 1.0:  # 1초 후 출발
-                    self.traffic_light_passed = True
-                    self.current_mode = DriveMode.RUBBERCON_AVOIDANCE
-                    self.traffic_light_state = "GREEN_PASSED"
-                    self.get_logger().info('🚦 Traffic light passed! Moving to rubbercon avoidance')
-            
-            self.traffic_light_state = "GREEN"
-        else:
-            self.green_light_detection_count = max(0, self.green_light_detection_count - 1)
-            self.traffic_light_confidence = 0
-            if self.green_light_detection_count == 0:
-                self.traffic_light_state = "RED_OR_YELLOW"
+            # 녹색불 감지 후 1초 후 출발
+            if time.time() - self.green_light_detected_time > 1.0:
+                self.traffic_light_passed = True
+                self.current_mode = DriveMode.RUBBERCON_AVOIDANCE
+                self.traffic_light_state = "GREEN_PASSED"
+                self.get_logger().info('🚦 Traffic light passed! Moving to rubbercon avoidance')
         
-        # 신호등 대기 중 정지
-        if not self.traffic_light_passed:
-            self.target_speed = 0.0
-            self.target_steering = 0.0
+        # 녹색 영역 시각화
+        cv2.putText(image, f"GREEN DETECTED! Pixels: {int(green_pixel_count)}", 
+                   (10, height-30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    else:
+        self.green_light_detection_count = max(0, self.green_light_detection_count - 1)
+        self.traffic_light_confidence = 0
+        self.traffic_light_state = "RED_OR_YELLOW"
         
-        # 디버그 정보
-        cv2.putText(image, f"🚦 TRAFFIC LIGHT: {self.traffic_light_state} | Count: {self.green_light_detection_count}", 
-                   (10, image.shape[0]-60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        
-        # 마스크 시각화 (작은 창)
-        mask_resized = cv2.resize(green_mask, (160, 120))
-        mask_colored = cv2.applyColorMap(mask_resized, cv2.COLORMAP_JET)
-        image[10:130, 10:170] = mask_colored
+        cv2.putText(image, f"WAITING... Pixels: {int(green_pixel_count)}", 
+                   (10, height-30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    
+    # 신호등 대기 중 정지
+    if not self.traffic_light_passed:
+        self.target_speed = 0.0
+        self.target_steering = 0.0
+    
+    # 디버그 정보
+    cv2.putText(image, f"🚦 TRAFFIC LIGHT: {self.traffic_light_state} | Count: {self.green_light_detection_count}", 
+               (10, image.shape[0]-60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
     def detect_obstacle_car(self, image):
         """방해차량 감지 - NEW for 2025"""
