@@ -1464,7 +1464,7 @@ class Autoracer(Node):
             "steering_angle": f"{math.degrees(self.current_steering):.1f}",
         }
 
-    def main(args=None):
+def main(args=None):
         rclpy.init(args=args)
         
         try:
@@ -1477,5 +1477,5 @@ class Autoracer(Node):
                 autoracer.destroy_node()
             rclpy.shutdown()
 
-    if __name__ == '__main__':
-        main()
+if __name__ == '__main__':
+    main()
