@@ -459,6 +459,7 @@ class Autoracer(Node):
         self.image_lock = threading.Lock()
         
         # Mission state
+        
         self.current_mode = DriveMode.TRAFFIC_LIGHT_WAIT
         self.mission_stage = 0
         self.mission_complete = False
@@ -626,7 +627,7 @@ class Autoracer(Node):
         
         # Mission-specific processing
         if self.current_mode == DriveMode.TRAFFIC_LIGHT_WAIT:
-            self._process_traffic_light(processed)
+            self._process_traffic_light=True
             
         elif self.current_mode == DriveMode.RUBBERCON_NAVIGATION:
             self._process_rubbercon(processed)
